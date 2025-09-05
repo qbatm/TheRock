@@ -124,6 +124,7 @@ jobs:
       - mock_windows_build_and_test
       - mock_general_failure
     runs-on: ubuntu-24.04
+    environment: email_creds
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -166,7 +167,7 @@ jobs:
           echo "📧 Sending mock pipeline completion email..."
           
           # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
+          CMD="python .github/sent_email.py --gmail-pass ${secrets.GMAIL_PASS} --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then
@@ -193,6 +194,7 @@ jobs:
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
 
 
 
