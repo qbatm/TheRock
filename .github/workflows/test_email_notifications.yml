@@ -22,7 +22,7 @@ permissions:
 jobs:
   setup:
     name: Mock Setup
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     outputs:
       linux_amdgpu_families: '["gfx110X-dgpu"]'
       windows_amdgpu_families: '["gfx110X-dgpu"]'
@@ -37,7 +37,7 @@ jobs:
   mock_linux_build_and_test:
     name: Mock Linux Build & Test
     needs: setup
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -72,7 +72,7 @@ jobs:
   mock_windows_build_and_test:
     name: Mock Windows Build & Test
     needs: setup
-    runs-on: ubuntu-24.04  # Using ubuntu for simplicity in testing
+    runs-on: self-hosted  # Using ubuntu for simplicity in testing
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -107,7 +107,7 @@ jobs:
   mock_general_failure:
     name: Mock General Failure Job
     needs: setup
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     if: ${{ inputs.simulate_failure }}
     steps:
       - name: Simulate failure
@@ -123,7 +123,7 @@ jobs:
       - mock_linux_build_and_test
       - mock_windows_build_and_test
       - mock_general_failure
-    runs-on: ubuntu-24.04
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -193,4 +193,5 @@ jobs:
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
 
