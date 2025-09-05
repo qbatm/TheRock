@@ -166,7 +166,7 @@ jobs:
           echo "📧 Sending mock pipeline completion email..."
           
           # Build the command with conditional parameters
-          CMD="python sent_email.py --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
+          CMD="python .github\sent_email.py --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then
@@ -193,3 +193,4 @@ jobs:
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
