@@ -78,7 +78,10 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         "• Cross-platform support (Linux & Windows)",
         "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
         "",
-        "This notification was sent automatically by TheRock CI pipeline."
+        "This notification was sent automatically by TheRock CI pipeline.",
+        "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
+        "gpuArchPattern: linux-gfx120X",
+        "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/"
     ])
     
     body = "\n".join(body_parts)
@@ -129,4 +132,5 @@ if __name__ == "__main__":
             subject="Test Subject",
             body="This is a test email sent from Python using Gmail.",
             sender_password="gzha newu shxb dyua"  # Hardcoded for backward compatibility
+
         )
