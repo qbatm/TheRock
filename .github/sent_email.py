@@ -40,7 +40,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
     status_emoji = "✅" if status == "success" else "❌" if status == "failure" else "⚠️"
     
-    subject = f"{status_emoji} TheRock Pipeline {status.title()} - Libraries & PyTorch Wheels"
+    subject = f"{status_emoji} TheRock Pipeline {status.title()} - Libraries & PyTorch Wheels - {platform}"
     
     body_parts = [
         f"TheRock Pipeline Completion Notification",
@@ -153,3 +153,4 @@ if __name__ == "__main__":
             sender_password="gzha newu shxb dyua"  # Hardcoded for backward compatibility
 
         )
+
