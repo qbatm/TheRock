@@ -80,7 +80,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
             "",
             "This notification was sent automatically by TheRock CI pipeline.",
-            "PLATFORM: linux",
+            "PLATFORM: Linux",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
             "gpuArchPattern: linux-gfx120X",
             "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/"
@@ -153,4 +153,5 @@ if __name__ == "__main__":
             sender_password="gzha newu shxb dyua"  # Hardcoded for backward compatibility
 
         )
+
 
