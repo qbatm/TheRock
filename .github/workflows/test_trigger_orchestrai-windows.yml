@@ -130,7 +130,7 @@ jobs:
           echo ${{secrets.GMAIL_PASS}}
           
           # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --gmail-pass \"${{secrets.GMAIL_PASS}}\" --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Linux"
+          CMD="python .github/sent_email.py --gmail-pass \"${{secrets.GMAIL_PASS}}\" --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Windows"
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then
