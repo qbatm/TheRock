@@ -11,10 +11,6 @@ on:
         description: 'Simulate Linux build failure'
         type: boolean
         default: false
-      simulate_windows_failure:
-        description: 'Simulate Windows build failure'
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -69,41 +65,6 @@ jobs:
           sleep 2
           echo "✅ All tests passed"
 
-  mock_windows_build_and_test:
-    name: Mock Windows Build & Test
-    needs: setup
-    runs-on: ubuntu-24.04  # Using ubuntu for simplicity in testing
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Mock ROCm Libraries Build (Windows)
-        run: |
-          echo "🔨 Mocking Windows ROCm libraries compilation..."
-          echo "Building: hip-clr, rocblas, rocfft (Windows variants)..."
-          sleep 3
-          echo "✅ Windows ROCm libraries build completed"
-
-      - name: Mock PyTorch Wheel Build (Windows)
-        run: |
-          echo "🐍 Mocking Windows PyTorch wheel creation..."
-          echo "Building torch wheel for Windows..."
-          echo "Target: gfx110X-dgpu"
-          sleep 2
-          
-          if [[ "${{ inputs.simulate_windows_failure }}" == "true" ]]; then
-            echo "❌ Simulated Windows build failure"
-            exit 1
-          fi
-          
-          echo "✅ Windows PyTorch wheels built successfully"
-
-      - name: Mock Windows Tests
-        run: |
-          echo "🧪 Mocking Windows tests..."
-          sleep 1
-          echo "✅ Windows tests passed"
-
   mock_general_failure:
     name: Mock General Failure Job
     needs: setup
@@ -121,7 +82,6 @@ jobs:
     needs:
       - setup
       - mock_linux_build_and_test
-      - mock_windows_build_and_test
       - mock_general_failure
     runs-on: ubuntu-24.04
     environment: email_creds
@@ -170,7 +130,7 @@ jobs:
           echo ${{secrets.GMAIL_PASS}}
           
           # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --gmail-pass \"${{secrets.GMAIL_PASS}}\" --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
+          CMD="python .github/sent_email.py --gmail-pass \"${{secrets.GMAIL_PASS}}\" --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Linux"
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then
@@ -197,6 +157,7 @@ jobs:
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
 
 
 
