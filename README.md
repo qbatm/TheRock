@@ -1,12 +1,6 @@
 # TheRock
 
-
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit) [![CI](https://github.com/ROCm/TheRock/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/ROCm/TheRock/actions/workflows/ci.yml?query=branch%3Amain) [![CI Nightly](https://github.com/ROCm/TheRock/actions/workflows/ci_nightly.yml/badge.svg?branch=main)](https://github.com/ROCm/TheRock/actions/workflows/ci_nightly.yml?query=branch%3Amain)
-
-
-[![Jenkins Build Status](https://ucicd-jenkins.amd.com/job/OrchestrAI-TheRock-Multi/badge/icon)](https://ucicd-jenkins.amd.com/job/OrchestrAI-TheRock-Multi/)  
-[Jenkins: OrchestrAI-TheRock-Multi](https://ucicd-jenkins.amd.com/job/OrchestrAI-TheRock-Multi/)  
-*Jenkins build status badge and link above are only visible to users with access to the AMD Jenkins server. If the badge does not display, use the link to view the job status.*
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit) [![CI](https://github.com/ROCm/TheRock/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/ROCm/TheRock/actions/workflows/ci.yml?query=branch%3Amain) [![CI Nightly](https://github.com/ROCm/TheRock/actions/workflows/ci_nightly.yml/badge.svg?branch=main)](https://github.com/ROCm/TheRock/actions/workflows/ci_nightly.yml?query=branch%3Amain) [![Jenkins Pipeline](https://ucicd-jenkins.amd.com/buildStatus/icon?job=OrchestrAI-TheRock-Multi&subject=Jenkins%20Pipeline)](https://ucicd-jenkins.amd.com/job/OrchestrAI-TheRock-Multi/)
 
 TheRock (The HIP Environment and ROCm Kit) is a lightweight open source build platform for HIP and ROCm. The project is currently in an **early preview state** but is under active development and welcomes contributors. Come try us out! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more info.
 
