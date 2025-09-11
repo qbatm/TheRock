@@ -6,16 +6,15 @@ import time
 import requests
 from email.header import decode_header
 
-def trigger_orchestrai_pipeline(S3_BUCKET_URL, gpuArchPattern, THEROCK_WHL_URL, Platform):
+def trigger_orchestrai_pipeline(S3_BUCKET_URL, gpuArchPattern, THEROCK_WHL_URL, Platform, API_TOKEN):
     """
     Triggers the OrchestrAI-TheRock Jenkins pipeline with specified parameters.
-    Adjust the JOB, USER, API_TOKEN, and parameters as needed.
+    Adjust the JOB, USER, and parameters as needed.
     """
 
     JENKINS = "https://ucicd-jenkins.amd.com/"
     JOB = "OrchestrAI-TheRock-Multi"  # adjust (for foldered jobs: "folder/job/JobName")
     USER = "jpiatkow"
-    API_TOKEN = "111f794615eb483ff156c2115246bd76a1"
 
     session = requests.Session()
     session.auth = (USER, API_TOKEN)
@@ -138,10 +137,10 @@ def get_latest_email(search_string, email_pass, max_emails=100, platform="linux"
     mail.logout()
     return {}
 
-# Example usage
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Get latest email with specified search string')
     parser.add_argument('--email_pass', required=True, help='Gmail app password')
+    parser.add_argument('--api_token', required=True, help='Jenkins API token')
     parser.add_argument('--search_string', default='TheRock Pipeline', help='Search string to find in email subject (default: "TheRock Pipeline")')
     parser.add_argument('--max_emails', type=int, default=100, help='Maximum number of emails to check from latest (default: 100)')
     
@@ -156,4 +155,4 @@ if __name__ == "__main__":
         print("No pipeline information found.")
 
     if result:
-        trigger_orchestrai_pipeline(result.get('S3_BUCKET_URL'), result.get('gpuArchPattern'), result.get('THEROCK_WHL_URL'), result.get('Platform'))
+        trigger_orchestrai_pipeline(result.get('S3_BUCKET_URL'), result.get('gpuArchPattern'), result.get('THEROCK_WHL_URL'), result.get('Platform'), args.api_token)
