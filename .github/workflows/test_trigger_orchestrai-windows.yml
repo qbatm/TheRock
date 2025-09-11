@@ -1,6 +1,9 @@
 name: Trigger OrchestrAI-TheRock-Windows
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       simulate_failure:
