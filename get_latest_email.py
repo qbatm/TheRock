@@ -89,7 +89,7 @@ def extract_pipeline_info(email_body):
 
 def get_latest_email(search_string, email_pass, max_emails=100, platform="linux"):
     imap_server = "imap.gmail.com"
-    email_user = "kuba.kubanczyk@gmail.com" #"your_gmail_address@gmail.com"
+    email_user = "j93113820@gmail.com" #"your_gmail_address@gmail.com"
     # email_pass is now passed as a parameter
 
     # Connect to the server
