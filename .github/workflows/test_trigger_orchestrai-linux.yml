@@ -125,7 +125,7 @@ jobs:
       - name: Send mock pipeline completion email
         if: always()
         env:
-          RECIPIENT_EMAIL: ${{secrets.GMAIL_ACCOUNT}}
+          RECIPIENT_EMAIL: \"${{secrets.GMAIL_ACCOUNT}}\"
         run: |
           echo "📧 Sending mock pipeline completion email..."
 
@@ -160,6 +160,7 @@ jobs:
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
 
 
 
