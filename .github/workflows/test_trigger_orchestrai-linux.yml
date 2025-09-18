@@ -125,7 +125,7 @@ jobs:
       - name: Send mock pipeline completion email
         if: always()
         env:
-          RECIPIENT_EMAIL: "kuba.kubanczyk@gmail.com"
+          RECIPIENT_EMAIL: \"${{secrets.GMAIL_ACCOUNT}}\"
         run: |
           echo "📧 Sending mock pipeline completion email..."
 
@@ -156,10 +156,11 @@ jobs:
           echo "Failed Jobs: $FAILED_JOBS"
           echo "Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo ""
-          echo "📧 Email notification has been sent to: kuba.kubanczyk@gmail.com"
+          echo "📧 Email notification has been sent to email."
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
 
 
 
