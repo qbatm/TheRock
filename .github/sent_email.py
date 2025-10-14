@@ -8,7 +8,11 @@ from email.mime.text import MIMEText
 def send_email(receiver_email, subject, body, sender_password=None, sender_email=None):
     smtp_server = "smtp.gmail.com"
     smtp_port = 587
-    sender_email = sender_email or "j93113820@gmail.com"
+    
+    # Check for sender email
+    if sender_email is None:
+        print("Error: Sender email not provided. Use --sender-email argument.")
+        sys.exit(1)
     
     # Get password from parameter, environment variable, or prompt user
     if sender_password is None:
@@ -114,8 +118,8 @@ def main():
     
     # Email configuration
     parser.add_argument("--gmail-pass", help="Gmail app password for authentication")
-    parser.add_argument("--sender-email", default="j93113820@gmail.com", 
-                       help="Sender email address (default: j93113820@gmail.com)")
+    parser.add_argument("--sender-email", required=True, 
+                       help="Sender email address")
     parser.add_argument("--platform", default="linux", 
                        help="Chose platform: windows or linux.")
     
@@ -146,12 +150,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         main()
     else:
-        send_email(
-            receiver_email="j93113820@gmail.com",
-            subject="Test Subject",
-            body="This is a test email sent from Python using Gmail.",
-            sender_password="gzha newu shxb dyua"  # Hardcoded for backward compatibility
-
-        )
+        print("Usage: python sent_email.py --receiver EMAIL --status STATUS --sender-email EMAIL [options]")
+        print("Use --help for more information.")
+        sys.exit(1)
 
 
