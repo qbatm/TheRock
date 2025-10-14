@@ -2,7 +2,7 @@ name: Trigger OrchestrAI-TheRock-Linux
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # Runs every 10 minutes
+    - cron: "0 * * * *" # Runs every 10 minutes
   pull_request:
     branches:
       - main
