@@ -18,7 +18,7 @@ def send_email(receiver_email, subject, body, sender_password=None, sender_email
     if sender_password is None:
         sender_password = os.getenv('GMAIL_PASSWORD')
         if sender_password is None:
-            print("Error: Gmail password not provided. Use --gmail-pass argument or GMAIL_PASSWORD environment variable.")
+            print("Error: Sender email password not provided. Use --sender-email-pass argument or GMAIL_PASSWORD environment variable.")
             sys.exit(1)
 
     msg = MIMEText(body)
@@ -117,7 +117,7 @@ def main():
     parser.add_argument("--details", help="Additional details about the pipeline")
     
     # Email configuration
-    parser.add_argument("--gmail-pass", help="Gmail app password for authentication")
+    parser.add_argument("--sender-email-pass", help="Sender email app password for authentication")
     parser.add_argument("--sender-email", required=True, 
                        help="Sender email address")
     parser.add_argument("--platform", default="linux", 
@@ -131,7 +131,7 @@ def main():
     
     if args.subject and args.body:
         # Legacy mode
-        send_email(args.receiver, args.subject, args.body, args.gmail_pass, args.sender_email)
+        send_email(args.receiver, args.subject, args.body, args.sender_email_pass, args.sender_email)
     else:
         # Pipeline notification mode
         send_pipeline_notification(
@@ -140,7 +140,7 @@ def main():
             workflow_url=args.workflow_url,
             failed_jobs=args.failed_jobs,
             details=args.details,
-            sender_password=args.gmail_pass,
+            sender_password=args.sender_email_pass,
             sender_email=args.sender_email,
             platform=args.platform
         )

@@ -125,15 +125,12 @@ jobs:
       - name: Send mock pipeline completion email
         if: always()
         env:
-          RECIPIENT_EMAIL: \"${{secrets.GMAIL_ACCOUNT}}\"
+          RECIPIENT_EMAIL: \"${{secrets.RECEIVER_EMAIL}}\"
         run: |
           echo "📧 Sending mock pipeline completion email..."
-
-          echo test
-          echo ${{secrets.GMAIL_PASS}}
-          
+         
           # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --gmail-pass \"${{secrets.GMAIL_PASS}}\" --receiver \"$RECIPIENT_EMAIL\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Linux"
+          CMD="python .github/sent_email.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Linux"
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then
