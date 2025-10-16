@@ -1,9 +1,11 @@
 name: Trigger OrchestrAI-TheRock-Windows
 
 on:
-  # pull_request:
-  #   branches:
-  #     - main
+  schedule:
+    - cron: "0 * * * *" # Runs every 1h
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       simulate_failure:
