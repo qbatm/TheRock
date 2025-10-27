@@ -75,6 +75,20 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "",
         ])
 
+    # if platform.lower() == "linux":
+    #     body_parts.extend([
+    #         "This pipeline includes:",
+    #         "• ROCm libraries compilation and testing",
+    #         "• PyTorch wheel building and validation",
+    #         "• Cross-platform support (Linux & Windows)",
+    #         "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
+    #         "",
+    #         "This notification was sent automatically by TheRock CI pipeline.",
+    #         "PLATFORM: Linux",
+    #         "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
+    #         "gpuArchPattern: linux-gfx120X",
+    #         "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/"
+    #     ])
     if platform.lower() == "linux":
         body_parts.extend([
             "This pipeline includes:",
@@ -86,8 +100,8 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Linux",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
-            "gpuArchPattern: linux-gfx120X",
-            "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/"
+            "gpuArchPattern: linux-gfx110X-dgpu",
+            "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx110X-dgpu/"
         ])
     if platform.lower() == "windows":
         body_parts.extend([
