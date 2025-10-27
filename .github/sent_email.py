@@ -101,7 +101,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "PLATFORM: Linux",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
             "gpuArchPattern: linux-gfx110X-dgpu",
-            "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx110X-dgpu/"
+            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
         ])
     if platform.lower() == "windows":
         body_parts.extend([
