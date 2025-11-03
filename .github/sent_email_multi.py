@@ -180,68 +180,68 @@ def main():
     else:
         # Use default configurations
         platform_configs = {
-            "linux": {
+            "linux-gfx110X-dgpu": {
                 "PLATFORM": "Linux",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
                 "gpuArchPattern": "linux-gfx110X-dgpu",
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
-            "linux": {
+            "linux-gfx110X-dgpu-xtx": {
                 "PLATFORM": "Linux",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
                 "gpuArchPattern": "linux-gfx110X-dgpu-xtx",
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu-navi44xt",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu--navi44xt",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "windows": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu-navi44xt",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
-            "linux": {
+            "linux-gfx110X-dgpu-navi44xt": {
                 "PLATFORM": "Linux",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
                 "gpuArchPattern": "linux-gfx110X-dgpu-navi44xt",
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
+            "windows-gfx110X-dgpu-1": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-2": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-3": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-4": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi44xt-1": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu-navi44xt",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi44xt-2": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu--navi44xt",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi44xt-3": {
+                "PLATFORM": "Windows",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu-navi44xt",
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
         }
-        print("No platform configurations provided. Using default Linux and Windows configurations.")
+        print("No platform configurations provided. Using default configurations (10 platforms).")
     
     # Send notifications
     send_multiple_notifications(
