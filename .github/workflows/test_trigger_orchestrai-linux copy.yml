@@ -1,4 +1,4 @@
-name: Trigger OrchestrAI-TheRock-Windows
+name: Trigger OrchestrAI-TheRock-Multi-Trigger
 
 on:
   # schedule:
@@ -12,8 +12,8 @@ on:
         description: 'Simulate pipeline failure'
         type: boolean
         default: false
-      simulate_windows_failure:
-        description: 'Simulate Windows build failure'
+      simulate_linux_failure:
+        description: 'Simulate Linux build failure'
         type: boolean
         default: false
 
@@ -35,40 +35,40 @@ jobs:
           echo "Linux families: gfx110X-dgpu"
           echo "Windows families: gfx110X-dgpu"
 
-  mock_windows_build_and_test:
-    name: Mock Windows Build & Test
+  mock_linux_build_and_test:
+    name: Mock Linux Build & Test
     needs: setup
-    runs-on: ubuntu-24.04  # Using ubuntu for simplicity in testing
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Mock ROCm Libraries Build (Windows)
+      - name: Mock ROCm Libraries Build
         run: |
-          echo "🔨 Mocking Windows ROCm libraries compilation..."
-          echo "Building: hip-clr, rocblas, rocfft (Windows variants)..."
+          echo "🔨 Mocking ROCm libraries compilation..."
+          echo "Building: rocm-cmake, hip-clr, rocblas, rocfft, rocsparse, miopen..."
           sleep 3
-          echo "✅ Windows ROCm libraries build completed"
+          echo "✅ ROCm libraries build completed successfully"
 
-      - name: Mock PyTorch Wheel Build (Windows)
+      - name: Mock PyTorch Wheel Build
         run: |
-          echo "🐍 Mocking Windows PyTorch wheel creation..."
-          echo "Building torch wheel for Windows..."
+          echo "🐍 Mocking PyTorch wheel creation..."
+          echo "Building torch, torchvision, torchaudio wheels..."
           echo "Target: gfx110X-dgpu"
           sleep 2
           
-          if [[ "${{ inputs.simulate_windows_failure }}" == "true" ]]; then
-            echo "❌ Simulated Windows build failure"
+          if [[ "${{ inputs.simulate_linux_failure }}" == "true" ]]; then
+            echo "❌ Simulated Linux build failure"
             exit 1
           fi
           
-          echo "✅ Windows PyTorch wheels built successfully"
+          echo "✅ PyTorch wheels built successfully"
 
-      - name: Mock Windows Tests
+      - name: Mock Library Tests
         run: |
-          echo "🧪 Mocking Windows tests..."
-          sleep 1
-          echo "✅ Windows tests passed"
+          echo "🧪 Mocking library and wheel tests..."
+          sleep 2
+          echo "✅ All tests passed"
 
   mock_general_failure:
     name: Mock General Failure Job
@@ -86,7 +86,7 @@ jobs:
     if: always()
     needs:
       - setup
-      - mock_windows_build_and_test
+      - mock_linux_build_and_test
       - mock_general_failure
     runs-on: ubuntu-24.04
     environment: email_creds
@@ -132,7 +132,7 @@ jobs:
           echo "📧 Sending mock pipeline completion email..."
          
           # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Windows"
+          CMD="python .github/sent_email_multi.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then
@@ -159,5 +159,20 @@ jobs:
           echo ""
           echo "This was a test run of the email notification system."
           echo "The actual TheRock pipeline will work the same way when it completes."
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
