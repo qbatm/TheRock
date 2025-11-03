@@ -189,13 +189,13 @@ def main():
             "linux-gfx110X-dgpu-xtx": {
                 "PLATFORM": "Linux",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "linux-gfx110X-dgpu-xtx",
+                "gpuArchPattern": "linux-gfx110X-dgpu_xtx",
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "linux-gfx110X-dgpu-navi44xt": {
                 "PLATFORM": "Linux",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "linux-gfx110X-dgpu-navi44xt",
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi44xt",
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-1": {
