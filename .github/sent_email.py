@@ -98,7 +98,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
             "",
             "This notification was sent automatically by TheRock CI pipeline.",
-            "PLATFORM: Linux",
+            "PLATFORM: Ubuntu",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
             "gpuArchPattern: linux-gfx110X-dgpu",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
@@ -167,5 +167,6 @@ if __name__ == "__main__":
         print("Usage: python sent_email.py --receiver EMAIL --status STATUS --sender-email EMAIL [options]")
         print("Use --help for more information.")
         sys.exit(1)
+
 
 
