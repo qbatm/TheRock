@@ -180,12 +180,12 @@ def main():
     else:
         # Use default configurations
         platform_configs = {
-            "linux-gfx110X-dgpu": {
-                "PLATFORM": "Linux",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "linux-gfx110X-dgpu",
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
+            # "linux-gfx110X-dgpu": {
+            #     "PLATFORM": "Linux",
+            #     "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+            #     "gpuArchPattern": "linux-gfx110X-dgpu",
+            #     "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            # },
             "linux-gfx110X-dgpu-xtx": {
                 "PLATFORM": "Linux",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
