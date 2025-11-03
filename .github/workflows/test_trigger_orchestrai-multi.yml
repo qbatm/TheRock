@@ -1,8 +1,8 @@
 name: Trigger OrchestrAI-TheRock-Multi-Trigger
 
 on:
-  # schedule:
-  #   - cron: "0 * * * *" # Runs every 1h
+  schedule:
+    - cron: "0 * * * *" # Runs every 1h
   pull_request:
     branches:
       - main
