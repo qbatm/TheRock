@@ -181,63 +181,63 @@ def main():
         # Use default configurations
         platform_configs = {
             # "linux-gfx110X-dgpu": {
-            #     "PLATFORM": "Linux",
+            #     "PLATFORM": "Ubuntu",
             #     "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-            #     "gpuArchPattern": "linux-gfx110X-dgpu",
+            #     "gpuArchPattern": "linux-gfx110X-dgpu", # tag gpu_navi31xtw 
             #     "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             # },
             "linux-gfx110X-dgpu-xtx": {
-                "PLATFORM": "Linux",
+                "PLATFORM": "Ubuntu",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "linux-gfx110X-dgpu_xtx",
+                "gpuArchPattern": "linux-gfx110X-dgpu_xtx", # gpu_navi31xtx
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "linux-gfx110X-dgpu-navi44xt": {
-                "PLATFORM": "Linux",
+                "PLATFORM": "Ubuntu",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "linux-gfx110X-dgpu_navi44xt",
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi44xt", # gpu_navi44xt
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-1": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-2": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-3": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-4": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu",
+                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-navi44xt-1": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt", # gpu_navi44xt
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-navi44xt-2": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt", # gpu_navi44xt
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
             "windows-gfx110X-dgpu-navi44xt-3": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt", # gpu_navi44xt
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
         }
