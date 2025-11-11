@@ -89,6 +89,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         "This notification was sent automatically by TheRock CI pipeline.",
         f"PLATFORM: {platform_config.get('PLATFORM', 'N/A')}",
         f"S3_BUCKET_URL: \"{platform_config.get('S3_BUCKET_URL', 'N/A')}\"",
+        f"THEROCK_SDK_URL: {platform_config.get('THEROCK_SDK_URL', 'N/A')}",
         f"gpuArchPattern: {platform_config.get('gpuArchPattern', 'N/A')}",
         f"THEROCK_WHL_URL: {platform_config.get('THEROCK_WHL_URL', 'N/A')}"
     ])
