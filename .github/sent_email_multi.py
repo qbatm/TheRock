@@ -186,12 +186,6 @@ def main():
             #     "gpuArchPattern": "linux-gfx110X-dgpu", # tag gpu_navi31xtw 
             #     "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             # },
-            "linux-gfx110X-dgpu-xtx": {
-                "PLATFORM": "Ubuntu",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "linux-gfx110X-dgpu_xtx", # gpu_navi31xtx
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
             "linux-gfx110X-dgpu-navi44xt": {
                 "PLATFORM": "Ubuntu",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
@@ -238,6 +232,18 @@ def main():
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
                 "gpuArchPattern": "windows-gfx110X-dgpu_navi48xtx", # gpu_navi48xtx
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "linux-gfx110X-dgpu-navi48xtx-1": {
+                "PLATFORM": "Ubuntu",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi48xtx", # gpu_navi48xtx
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "linux-gfx110X-dgpu-navi44xt-1": {
+                "PLATFORM": "Ubuntu",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi44xt", # gpu_navi44xt
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
         }
