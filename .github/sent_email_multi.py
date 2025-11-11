@@ -204,12 +204,6 @@ def main():
                 "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
                 "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
             },
-            "windows-gfx110X-dgpu-3": {
-                "PLATFORM": "Windows",
-                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
-                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
-                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
-            },
             "windows-gfx110X-dgpu-navi44xt-1": {
                 "PLATFORM": "Windows",
                 "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
