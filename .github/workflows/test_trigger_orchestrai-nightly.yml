@@ -1,4 +1,4 @@
-name: Trigger OrchestrAI-TheRock-Multi-Trigger
+name: Trigger OrchestrAI-TheRock-Nightly-Trigger
 
 on:
   # schedule:
