@@ -216,8 +216,9 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {gpu_arch_pattern}")
 
     # Build the command to get the latest tarball matching the pattern
-    # The command: curl to get bucket listing, grep to filter by pattern, sort by version, get the last one
-    cmd = f'/bin/bash -c \'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | sort -V | tail -1\''
+    # The command: curl to get bucket listing, grep to filter by pattern, sort by the date suffix (YYYYMMDD), get the last one
+    # We sort by the date pattern at the end of the filename (e.g., 20251113) to get the truly latest build
+    cmd = f'/bin/bash -c \'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | sort -t. -k1 | tail -1\''
 
     result = run_command_with_logging(cmd)
 
