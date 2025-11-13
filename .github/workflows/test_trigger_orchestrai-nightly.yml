@@ -1,8 +1,8 @@
 name: Trigger OrchestrAI-TheRock-Nightly-Trigger
 
 on:
-  # schedule:
-  #   - cron: "0 * * * *" # Runs every 1h
+  schedule:
+    - cron: "0 9 * * *" # Runs at 4:00 AM Toronto time (UTC-5, so 9:00 UTC)
   # pull_request:
   #   branches:
   #     - main
