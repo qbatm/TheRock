@@ -296,7 +296,7 @@ def main():
         latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_night)
         print(f"Latest Linux SDK URL: {latest_linux_sdk_url}")
 
-        windows_arch_night = "windows-gfx110X-dgpu"
+        windows_arch_night = "windows-gfx110X-all"
         latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_night)
         print(f"Latest Windows SDK URL: {latest_windows_sdk_url}")
         return None
