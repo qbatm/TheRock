@@ -216,9 +216,10 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {gpu_arch_pattern}")
 
     # Build the command to get the latest tarball matching the pattern
-    # The command: curl to get bucket listing, grep to filter by pattern, sort by the date suffix (YYYYMMDD), get the last one
-    # We sort by the date pattern at the end of the filename (e.g., 20251113) to get the truly latest build
-    cmd = f'/bin/bash -c \'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | sort -t. -k1 | tail -1\''
+    # Extract date suffix (YYYYMMDD) from filenames and sort numerically to get the latest build
+    # Date format in filenames: 7.10.0a20251113 or 7.9.0rc20251008 (8 digits at the end before .tar.gz)
+    # We extract just the date part, sort numerically, then get the corresponding full filename
+    cmd = f'/bin/bash -c \'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2\''
 
     result = run_command_with_logging(cmd)
 
