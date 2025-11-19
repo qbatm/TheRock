@@ -100,8 +100,8 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Ubuntu",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
-            "THEROCK_SDK_URL: https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-linux-gfx110X-dgpu-ADHOCBUILD-7.0.0rc20250625.tar.gz",
-            "gpuArchPattern: linux-gfx110X-dgpu",
+            "THEROCK_SDK_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-linux-gfx110X-dgpu-7.10.0a20251119.tar.gz\"",
+            "gpuArchPattern:  linux-gfx110X-dgpu_navi44xt",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
         ])
     if platform.lower() == "windows":
@@ -115,8 +115,8 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Windows",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
-            "THEROCK_SDK_URL: https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-windows-gfx110X-dgpu-7.0.0rc20250627.tar.gz",
-            "gpuArchPattern: windows-gfx110X-dgpu",
+            "THEROCK_SDK_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-windows-gfx110X-dgpu-7.0.0rc20250627.tar.gz\"",
+            "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
         ])
     
