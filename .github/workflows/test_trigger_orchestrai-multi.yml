@@ -132,7 +132,7 @@ jobs:
           echo "📧 Sending mock pipeline completion email..."
          
           # Build the command with conditional parameters
-          CMD="python .github/sent_email_multi.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\""
+          CMD="python .github/sent_email_multi.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --commit-id \"${{ github.sha }}\""
           
           # Add failed-jobs only if there are any
           if [[ -n "$FAILED_JOBS" ]]; then

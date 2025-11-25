@@ -42,7 +42,7 @@ def send_email(receiver_email, subject, body, sender_password=None, sender_email
     return True
 
 def send_pipeline_notification(receiver_email, status, workflow_url=None, failed_jobs=None, details=None, 
-                               sender_password=None, sender_email=None, platform_config=None):
+                               sender_password=None, sender_email=None, platform_config=None, commit_id=None):
     """Send a pipeline completion notification email for a specific platform configuration."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
     status_emoji = "✅" if status == "success" else "❌" if status == "failure" else "⚠️"
@@ -91,14 +91,15 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         f"S3_BUCKET_URL: \"{platform_config.get('S3_BUCKET_URL', 'N/A')}\"",
         f"THEROCK_SDK_URL: {platform_config.get('THEROCK_SDK_URL', 'N/A')}",
         f"gpuArchPattern: {platform_config.get('gpuArchPattern', 'N/A')}",
-        f"THEROCK_WHL_URL: {platform_config.get('THEROCK_WHL_URL', 'N/A')}"
+        f"THEROCK_WHL_URL: {platform_config.get('THEROCK_WHL_URL', 'N/A')}",
+        f"GH_COMMIT_ID: {platform_config.get('GH_COMMIT_ID', commit_id if commit_id else 'N/A')}"
     ])
     
     body = "\n".join(body_parts)
     return send_email(receiver_email, subject, body, sender_password, sender_email)
 
 def send_multiple_notifications(receiver_email, status, workflow_url=None, failed_jobs=None, details=None,
-                                sender_password=None, sender_email=None, platform_configs=None):
+                                sender_password=None, sender_email=None, platform_configs=None, commit_id=None):
     """Send pipeline notifications for multiple platform configurations."""
     if not platform_configs:
         print("Error: No platform configurations provided")
@@ -121,7 +122,8 @@ def send_multiple_notifications(receiver_email, status, workflow_url=None, faile
             details=details,
             sender_password=sender_password,
             sender_email=sender_email,
-            platform_config=platform_config
+            platform_config=platform_config,
+            commit_id=commit_id
         )
         
         if success:
@@ -152,6 +154,7 @@ def main():
     # Platform configurations
     parser.add_argument("--platforms-json", help="JSON string or file path containing platform configurations")
     parser.add_argument("--platforms-file", help="Path to JSON file containing platform configurations")
+    parser.add_argument("--commit-id", help="GitHub commit SHA")
     
     args = parser.parse_args()
     
@@ -262,7 +265,8 @@ def main():
         details=args.details,
         sender_password=args.sender_email_pass,
         sender_email=args.sender_email,
-        platform_configs=platform_configs
+        platform_configs=platform_configs,
+        commit_id=args.commit_id
     )
 
 # Example usage:

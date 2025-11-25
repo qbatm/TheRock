@@ -39,7 +39,7 @@ def send_email(receiver_email, subject, body, sender_password=None, sender_email
         if 'server' in locals() and server:
             server.quit()
 
-def send_pipeline_notification(receiver_email, status, workflow_url=None, failed_jobs=None, details=None, sender_password=None, sender_email=None, platform=None):
+def send_pipeline_notification(receiver_email, status, workflow_url=None, failed_jobs=None, details=None, sender_password=None, sender_email=None, platform=None, commit_id=None):
     """Send a pipeline completion notification email."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
     status_emoji = "✅" if status == "success" else "❌" if status == "failure" else "⚠️"
@@ -102,7 +102,8 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
             "THEROCK_SDK_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-linux-gfx110X-dgpu-7.10.0a20251119.tar.gz\"",
             "gpuArchPattern:  linux-gfx110X-dgpu_navi44xt",
-            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
+            f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
         ])
     if platform.lower() == "windows":
         body_parts.extend([
@@ -117,7 +118,8 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
             "THEROCK_SDK_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-windows-gfx110X-dgpu-7.0.0rc20250627.tar.gz\"",
             "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
-            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
+            f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
         ])
     
     body = "\n".join(body_parts)
@@ -138,6 +140,7 @@ def main():
                        help="Sender email address")
     parser.add_argument("--platform", default="linux", 
                        help="Chose platform: windows or linux.")
+    parser.add_argument("--commit-id", help="GitHub commit SHA")
     
     # Legacy support
     parser.add_argument("--subject", help="Email subject (legacy mode)")
@@ -158,7 +161,8 @@ def main():
             details=args.details,
             sender_password=args.sender_email_pass,
             sender_email=args.sender_email,
-            platform=args.platform
+            platform=args.platform,
+            commit_id=args.commit_id
         )
 
 # Example usage:
