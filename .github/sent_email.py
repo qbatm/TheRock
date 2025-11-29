@@ -122,6 +122,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
+        ])
     
     body = "\n".join(body_parts)
     return send_email(receiver_email, subject, body, sender_password, sender_email)
@@ -145,31 +146,26 @@ def run_command_with_logging(cmd: str, timeout: int = None) -> subprocess.Comple
 
         # Log all output regardless of return code
         print(f"Command exit code: {result.returncode}")
-
         if result.stdout:
             print("STDOUT:")
             print(result.stdout)
 
-    if args.subject and args.body:
-        # Legacy mode
-        success = send_email(args.receiver, args.subject, args.body, args.sender_email_pass, args.sender_email)
-        if not success:
-            sys.exit(1)
-    else:
-        # Pipeline notification mode
-        success = send_pipeline_notification(
-            receiver_email=args.receiver,
-            status=args.status,
-            workflow_url=args.workflow_url,
-            failed_jobs=args.failed_jobs,
-            details=args.details,
-            sender_password=args.sender_email_pass,
-            sender_email=args.sender_email,
-            platform=args.platform,
-            commit_id=args.commit_id
-        )
-        if not success:
-            sys.exit(1) Return a mock result object with error code
+        if result.stderr:
+            print("STDERR:")
+            print(result.stderr)
+
+        # Check exit code and log result
+        if result.returncode != 0:
+            print(f"ERROR: Command failed with exit code {result.returncode}")
+        else:
+            print("✓ Command executed successfully")
+
+        return result
+
+    except subprocess.TimeoutExpired as e:
+        print(f"ERROR: Command timed out after {timeout} seconds")
+
+        # Return a mock result object with error code
         class MockResult:
             def __init__(self):
                 self.returncode = 124  # Standard timeout exit code
@@ -238,8 +234,8 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     print(f"Full URL: {full_url}")
 
     return full_url
+    return full_url
 
-def main():
 def main():
     parser = argparse.ArgumentParser(description="Send TheRock pipeline completion notifications")
     parser.add_argument("--receiver", required=True, help="Receiver email address")
@@ -265,10 +261,12 @@ def main():
     
     if args.subject and args.body:
         # Legacy mode
-        send_email(args.receiver, args.subject, args.body, args.sender_email_pass, args.sender_email)
+        success = send_email(args.receiver, args.subject, args.body, args.sender_email_pass, args.sender_email)
+        if not success:
+            sys.exit(1)
     else:
         # Pipeline notification mode
-        send_pipeline_notification(
+        success = send_pipeline_notification(
             receiver_email=args.receiver,
             status=args.status,
             workflow_url=args.workflow_url,
@@ -279,6 +277,8 @@ def main():
             platform=args.platform,
             commit_id=args.commit_id
         )
+        if not success:
+            sys.exit(1)
 
 # Example usage:
 if __name__ == "__main__":
@@ -288,7 +288,6 @@ if __name__ == "__main__":
         print("Usage: python sent_email.py --receiver EMAIL --status STATUS --sender-email EMAIL [options]")
         print("Use --help for more information.")
         sys.exit(1)
-
 
 
 
