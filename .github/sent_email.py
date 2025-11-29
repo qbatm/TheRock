@@ -4,6 +4,7 @@ import smtplib
 import sys
 from datetime import datetime
 from email.mime.text import MIMEText
+import subprocess
 
 def send_email(receiver_email, subject, body, sender_password=None, sender_email=None):
     smtp_server = "smtp.gmail.com"
@@ -31,13 +32,14 @@ def send_email(receiver_email, subject, body, sender_password=None, sender_email
         server.starttls()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, receiver_email, msg.as_string())
-        print("Email sent successfully!")
+        print(f"Email sent successfully to {receiver_email}")
     except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+        print(f"Error sending email to {receiver_email}: {e}")
+        return False
     finally:
         if 'server' in locals() and server:
             server.quit()
+    return True
 
 def send_pipeline_notification(receiver_email, status, workflow_url=None, failed_jobs=None, details=None, sender_password=None, sender_email=None, platform=None, commit_id=None):
     """Send a pipeline completion notification email."""
@@ -120,11 +122,124 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
-        ])
     
     body = "\n".join(body_parts)
-    send_email(receiver_email, subject, body, sender_password, sender_email)
+    return send_email(receiver_email, subject, body, sender_password, sender_email)
 
+def run_command_with_logging(cmd: str, timeout: int = None) -> subprocess.CompletedProcess:
+    """
+    Execute a command with comprehensive logging.
+    
+    Args:
+        cmd: Command as a string
+        timeout: Maximum time in seconds to wait for command completion (None for no timeout)
+
+    Returns:
+        subprocess.CompletedProcess: The complete result object with returncode, stdout, stderr
+    """
+    try:
+        print(f"Running command: {cmd}")
+        if timeout:
+            print(f"Timeout: {timeout} seconds")
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+
+        # Log all output regardless of return code
+        print(f"Command exit code: {result.returncode}")
+
+        if result.stdout:
+            print("STDOUT:")
+            print(result.stdout)
+
+    if args.subject and args.body:
+        # Legacy mode
+        success = send_email(args.receiver, args.subject, args.body, args.sender_email_pass, args.sender_email)
+        if not success:
+            sys.exit(1)
+    else:
+        # Pipeline notification mode
+        success = send_pipeline_notification(
+            receiver_email=args.receiver,
+            status=args.status,
+            workflow_url=args.workflow_url,
+            failed_jobs=args.failed_jobs,
+            details=args.details,
+            sender_password=args.sender_email_pass,
+            sender_email=args.sender_email,
+            platform=args.platform,
+            commit_id=args.commit_id
+        )
+        if not success:
+            sys.exit(1) Return a mock result object with error code
+        class MockResult:
+            def __init__(self):
+                self.returncode = 124  # Standard timeout exit code
+                self.stdout = ""
+                self.stderr = f"Command timed out after {timeout} seconds"
+
+        return MockResult()
+
+    except Exception as e:
+        print(f"ERROR: Failed to execute command {cmd}: {e}")
+
+        # Return a mock result object with error code
+        class MockResult:
+            def __init__(self):
+                self.returncode = 1
+                self.stdout = ""
+                self.stderr = str(e)
+
+        return MockResult()
+
+def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
+    """
+    Get the latest tar.gz file path from S3 bucket matching the GPU architecture pattern.
+    Args:
+        s3_bucket_url: The S3 bucket URL (e.g., "https://therock-nightly-tarball.s3.amazonaws.com/")
+        gpu_arch_pattern: The GPU architecture pattern to match (e.g., "linux-gfx120X")
+    Returns:
+        str: The full URL to the latest tar.gz file, or empty string if not found or error
+    """
+    if not s3_bucket_url or not gpu_arch_pattern:
+        print("ERROR: Both s3_bucket_url and gpu_arch_pattern are required")
+        return ""
+
+    print("GPU patter before removing suffix: ", gpu_arch_pattern)
+    gpu_arch_pattern = gpu_arch_pattern.split("_")[0]  # Use only the part before underscore
+    print("GPU pattern after removing suffix: ", gpu_arch_pattern)
+
+    print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {gpu_arch_pattern}")
+
+    # Build the command to get the latest tarball matching the pattern
+    # Extract date suffix (YYYYMMDD) from filenames and sort numerically to get the latest build
+    # Date format in filenames: 7.10.0a20251113 or 7.9.0rc20251008 (8 digits at the end before .tar.gz)
+    # We extract just the date part, sort numerically, then get the corresponding full filename
+    cmd = f'/bin/bash -c \'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2\''
+
+    result = run_command_with_logging(cmd)
+
+    if result.returncode != 0:
+        print("ERROR: Failed to get S3 bucket listing")
+        return ""
+
+    # Get the filename from stdout
+    latest_filename = result.stdout.strip()
+
+    if not latest_filename:
+        print(f"ERROR: No tar.gz file found matching pattern '{gpu_arch_pattern}'")
+        return ""
+
+    # Construct the full URL
+    # Ensure s3_bucket_url ends with / and filename doesn't start with /
+    base_url = s3_bucket_url.rstrip("/")
+    filename = latest_filename.lstrip("/")
+    full_url = f"{base_url}/{filename}"
+
+    print(f"Latest tarball found: {latest_filename}")
+    print(f"Full URL: {full_url}")
+
+    return full_url
+
+def main():
 def main():
     parser = argparse.ArgumentParser(description="Send TheRock pipeline completion notifications")
     parser.add_argument("--receiver", required=True, help="Receiver email address")

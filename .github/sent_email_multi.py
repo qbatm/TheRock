@@ -5,6 +5,7 @@ import smtplib
 import sys
 from datetime import datetime
 from email.mime.text import MIMEText
+import subprocess
 
 def send_email(receiver_email, subject, body, sender_password=None, sender_email=None):
     smtp_server = "smtp.gmail.com"
@@ -137,15 +138,134 @@ def send_multiple_notifications(receiver_email, status, workflow_url=None, faile
     if failed_count > 0:
         sys.exit(1)
 
-def main():
-    parser = argparse.ArgumentParser(description="Send TheRock pipeline completion notifications for multiple platforms")
-    parser.add_argument("--receiver", required=True, help="Receiver email address")
-    parser.add_argument("--status", required=True, choices=["success", "failure", "warning"], 
-                       help="Pipeline status")
-    parser.add_argument("--workflow-url", help="URL to the GitHub workflow run")
-    parser.add_argument("--failed-jobs", help="Comma-separated list of failed jobs")
-    parser.add_argument("--details", help="Additional details about the pipeline")
+def run_command_with_logging(cmd: str, timeout: int = None) -> subprocess.CompletedProcess:
+    """
+    Execute a command with comprehensive logging.
     
+    Args:
+        cmd: Command as a string
+        timeout: Maximum time in seconds to wait for command completion (None for no timeout)
+
+    Returns:
+        subprocess.CompletedProcess: The complete result object with returncode, stdout, stderr
+    """
+    try:
+        print(f"Running command: {cmd}")
+        if timeout:
+            print(f"Timeout: {timeout} seconds")
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+
+        # Log all output regardless of return code
+        print(f"Command exit code: {result.returncode}")
+
+        if result.stdout:
+            print("STDOUT:")
+            print(result.stdout)
+
+        if result.stderr:
+            print("STDERR:")
+            print(result.stderr)
+
+        # Check exit code and log result
+        if result.returncode != 0:
+            print(f"ERROR: Command failed with exit code {result.returncode}")
+        else:
+            print("✓ Command executed successfully")
+
+        return result
+
+    except subprocess.TimeoutExpired as e:
+        print(f"ERROR: Command timed out after {timeout} seconds")
+
+        # Return a mock result object with error code
+        class MockResult:
+            def __init__(self):
+                self.returncode = 124  # Standard timeout exit code
+                self.stdout = ""
+    else:
+        # Use default configurations with automatic SDK URL fetching
+        s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
+
+        linux_arch_night = "linux-gfx110X-dgpu"
+        latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_night)
+        print(f"Latest Linux SDK URL: {latest_linux_sdk_url}")
+
+        windows_arch_night = "windows-gfx110X-all"
+        latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_night)
+        print(f"Latest Windows SDK URL: {latest_windows_sdk_url}")
+
+        platform_configs = {
+            # "linux-gfx110X-dgpu": {
+            #     "PLATFORM": "Ubuntu",
+            #     "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+            #     "gpuArchPattern": "linux-gfx110X-dgpu", # tag gpu_navi31xtw 
+            #     "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            # },
+            "linux-gfx110X-dgpu-navi44xt": {
+                "PLATFORM": "Ubuntu",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "THEROCK_SDK_URL": latest_linux_sdk_url,
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi44xt", # gpu_navi44xt
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-1": {
+                "PLATFORM": "Windows",
+                "THEROCK_SDK_URL": latest_windows_sdk_url,
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-2": {
+                "PLATFORM": "Windows",
+                "THEROCK_SDK_URL": latest_windows_sdk_url,
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu", # gpu_navi31xtx
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi44xt-1": {
+                "PLATFORM": "Windows",
+                "THEROCK_SDK_URL": latest_windows_sdk_url,
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt", # gpu_navi44xt
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi44xt-2": {
+                "PLATFORM": "Windows",
+                "THEROCK_SDK_URL": latest_windows_sdk_url,
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt", # gpu_navi44xt
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi44xt-3": {
+                "PLATFORM": "Windows",
+                "THEROCK_SDK_URL": latest_windows_sdk_url,
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi44xt", # gpu_navi44xt
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "windows-gfx110X-dgpu-navi48xtx-1": {
+                "PLATFORM": "Windows",
+                "THEROCK_SDK_URL": latest_windows_sdk_url,
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "gpuArchPattern": "windows-gfx110X-dgpu_navi48xtx", # gpu_navi48xtx
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "linux-gfx110X-dgpu-navi48xtx-1": {
+                "PLATFORM": "Ubuntu",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "THEROCK_SDK_URL": latest_linux_sdk_url,
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi48xtx", # gpu_navi48xtx
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+            "linux-gfx110X-dgpu-navi44xt-1": {
+                "PLATFORM": "Ubuntu",
+                "S3_BUCKET_URL": "https://therock-nightly-tarball.s3.amazonaws.com/",
+                "THEROCK_SDK_URL": latest_linux_sdk_url,
+                "gpuArchPattern": "linux-gfx110X-dgpu_navi44xt", # gpu_navi44xt
+                "THEROCK_WHL_URL": "https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/"
+            },
+        }
+        print("No platform configurations provided. Using default configurations (10 platforms).")
     # Email configuration
     parser.add_argument("--sender-email-pass", help="Sender email app password for authentication")
     parser.add_argument("--sender-email", required=True, 
