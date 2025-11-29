@@ -77,21 +77,11 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "",
         ])
 
-    # if platform.lower() == "linux":
-    #     body_parts.extend([
-    #         "This pipeline includes:",
-    #         "• ROCm libraries compilation and testing",
-    #         "• PyTorch wheel building and validation",
-    #         "• Cross-platform support (Linux & Windows)",
-    #         "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
-    #         "",
-    #         "This notification was sent automatically by TheRock CI pipeline.",
-    #         "PLATFORM: Linux",
-    #         "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
-    #         "gpuArchPattern: linux-gfx120X",
-    #         "THEROCK_WHL_URL: https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/"
-    #     ])
     if platform.lower() == "linux":
+        s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
+        linux_arch_pattern = "linux-gfx110X-dgpu"
+        latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_pattern)
+        
         body_parts.extend([
             "This pipeline includes:",
             "• ROCm libraries compilation and testing",
@@ -102,12 +92,16 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Ubuntu",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
-            "THEROCK_SDK_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-linux-gfx110X-dgpu-7.10.0a20251119.tar.gz\"",
+            f"THEROCK_SDK_URL: {latest_linux_sdk_url}",
             "gpuArchPattern:  linux-gfx110X-dgpu_navi44xt",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
         ])
-    if platform.lower() == "windows":
+    elif platform.lower() == "windows":
+        s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
+        windows_arch_pattern = "windows-gfx110X-all"
+        latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_pattern)
+        
         body_parts.extend([
             "This pipeline includes:",
             "• ROCm libraries compilation and testing",
@@ -118,7 +112,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Windows",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
-            "THEROCK_SDK_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/therock-dist-windows-gfx110X-dgpu-7.0.0rc20250627.tar.gz\"",
+            f"THEROCK_SDK_URL: {latest_windows_sdk_url}",
             "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
@@ -233,7 +227,6 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     print(f"Latest tarball found: {latest_filename}")
     print(f"Full URL: {full_url}")
 
-    return full_url
     return full_url
 
 def main():
