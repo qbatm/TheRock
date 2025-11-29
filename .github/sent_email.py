@@ -82,6 +82,10 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         linux_arch_pattern = "linux-gfx110X-dgpu"
         latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_pattern)
         
+        if not latest_linux_sdk_url:
+            print("No Linux tarball found; skipping email notification.")
+            return True
+        
         body_parts.extend([
             "This pipeline includes:",
             "• ROCm libraries compilation and testing",
@@ -93,7 +97,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "PLATFORM: Ubuntu",
             "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
             f"THEROCK_SDK_URL: {latest_linux_sdk_url}",
-            "gpuArchPattern:  linux-gfx110X-dgpu_navi44xt",
+            "gpuArchPattern:  linux-gfx110X-dgpu",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
         ])
@@ -101,6 +105,10 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
         windows_arch_pattern = "windows-gfx110X-all"
         latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_pattern)
+        
+        if not latest_windows_sdk_url:
+            print("No Windows tarball found; skipping email notification.")
+            return True
         
         body_parts.extend([
             "This pipeline includes:",
@@ -116,7 +124,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
-        ])
+        ])       
     
     body = "\n".join(body_parts)
     return send_email(receiver_email, subject, body, sender_password, sender_email)
