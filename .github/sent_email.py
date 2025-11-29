@@ -5,6 +5,7 @@ import sys
 from datetime import datetime
 from email.mime.text import MIMEText
 import subprocess
+import platform
 
 def send_email(receiver_email, subject, body, sender_password=None, sender_email=None):
     smtp_server = "smtp.gmail.com"
@@ -77,14 +78,54 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "",
         ])
 
+
+    gpu_mapping = {
+        "linux-gfx110X-all": [
+            "gpu_navi31xtx",      # AMD Radeon RX 7900 XTX - gfx1100
+            "gpu_navi31xt",       # AMD Radeon RX 7900 XT - gfx1100
+            # "gpu_navi31xl",       # AMD Radeon RX 7900 GRE - gfx1100
+            "gpu_navi31xtw",      # AMD Radeon PRO W7900 - gfx1100
+            # "Navi 31 XTW-DS",   # AMD Radeon PRO W7900 Dual Slot - gfx1100
+            # "Navi 32 XTW",      # AMD Radeon PRO W7800 - gfx1100
+            # "Navi 32 XTW 48GB", # AMD Radeon PRO W7800 48GB - gfx1100
+            "gpu_navi32xtx",      # AMD Radeon RX 7800 XT - gfx1101
+            "gpu_navi32xl",       # AMD Radeon RX 7700 XT - gfx1101
+            # "Navi33",           # AMD Radeon RX 7600 XT / RX 7600 - gfx1102
+            # "Navi33 GLXT",      # AMD Radeon PRO W7600 - gfx1102
+            # "Navi33 GLXL"       # AMD Radeon PRO W7500 - gfx1102
+        ],
+        "linux-gfx120X-all": [
+            "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
+            "gpu_navi48xtx",      # AMD Radeon RX 9070 XT - gfx1201
+            # "gpu_navi48xl",       # AMD Radeon RX 9070 GRE - gfx1201
+            "gpu_navi48xtw",      # AMD Radeon AI PRO R9700 - gfx1201
+            "gpu_navi44xl",       # AMD Radeon RX 9060 - gfx1200
+            "gpu_navi44xt"        # AMD Radeon RX 9060 XT - gfx1200
+        ],
+        # "linux-gfx115X-all": [
+        #     "Radeon 8060S Graphics",  # AMD Ryzen AI Max+ 395 - gfx1151 Strix Halo
+        #     "Radeon 8050S Graphics",  # AMD Ryzen AI Max 390/385 - gfx1151 Strix Halo
+        #     "AMD Radeon 890M",        # AMD Ryzen AI 9 HX 375/370 - gfx1150 Strix Point
+        #     "AMD Radeon 880M"         # AMD Ryzen AI 9 365 - gfx1150 Strix Point
+        # ]
+    }
+
     if platform.lower() == "linux":
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
-        linux_arch_pattern = "linux-gfx110X-dgpu"
+        linux_arch_pattern = "linux-gfx110X-all"
         latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_pattern)
         
         if not latest_linux_sdk_url:
             print("No Linux tarball found; skipping email notification.")
             return True
+
+        # Get the first GPU from the mapping, with proper error handling
+        gpu_list = gpu_mapping.get("linux-gfx110X-all", [])
+        linux_arch_pattern_maas_tag = gpu_list[0] if gpu_list else ""
+        
+        if not linux_arch_pattern_maas_tag:
+            print(f"ERROR: No MAAS tag found for GPU architecture pattern 'linux-gfx110X-all'")
+            return False
         
         body_parts.extend([
             "This pipeline includes:",
@@ -95,9 +136,9 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "",
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Ubuntu",
-            "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
+            f"S3_BUCKET_URL: {s3_bucket_url}",
             f"THEROCK_SDK_URL: {latest_linux_sdk_url}",
-            "gpuArchPattern:  linux-gfx110X-dgpu",
+            f"gpuArchPattern:  {linux_arch_pattern_maas_tag}",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
         ])
@@ -119,9 +160,9 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             "",
             "This notification was sent automatically by TheRock CI pipeline.",
             "PLATFORM: Windows",
-            "S3_BUCKET_URL: \"https://therock-nightly-tarball.s3.amazonaws.com/\"",
+            f"S3_BUCKET_URL: {s3_bucket_url}",
             f"THEROCK_SDK_URL: {latest_windows_sdk_url}",
-            "gpuArchPattern: windows-gfx110X-dgpu_navi48xtx",
+            f"gpuArchPattern: {windows_arch_pattern}",
             "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
             f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
         ])       
@@ -201,17 +242,22 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
         print("ERROR: Both s3_bucket_url and gpu_arch_pattern are required")
         return ""
 
-    print("GPU patter before removing suffix: ", gpu_arch_pattern)
-    gpu_arch_pattern = gpu_arch_pattern.split("_")[0]  # Use only the part before underscore
-    print("GPU pattern after removing suffix: ", gpu_arch_pattern)
+    print("GPU pattern before removing suffix: ", gpu_arch_pattern)
+    gpu_arch_pattern_base = gpu_arch_pattern.split("_")[0]  # Use only the part before underscore
+    print("GPU pattern after removing suffix: ", gpu_arch_pattern_base)
 
-    print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {gpu_arch_pattern}")
+    print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {gpu_arch_pattern_base}")
 
     # Build the command to get the latest tarball matching the pattern
     # Extract date suffix (YYYYMMDD) from filenames and sort numerically to get the latest build
     # Date format in filenames: 7.10.0a20251113 or 7.9.0rc20251008 (8 digits at the end before .tar.gz)
     # We extract just the date part, sort numerically, then get the corresponding full filename
-    cmd = f'/bin/bash -c \'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2\''
+    if platform.system().lower() == "windows":
+        # Windows command using PowerShell
+        cmd = f'powershell -Command "& {{(Invoke-WebRequest -Uri \'{s3_bucket_url}\' -UseBasicParsing).Content | Select-String -Pattern \'<Key>([^<]*{gpu_arch_pattern_base}[^<]*\\.tar\\.gz)</Key>\' -AllMatches | ForEach-Object {{$_.Matches.Groups[1].Value}} | Where-Object {{$_ -notmatch \'ADHOCBUILD\'}} | Sort-Object {{[regex]::Match($_, \'[0-9]{{8}}\').Value}} | Select-Object -Last 1}}"'
+    else:
+        # Linux/Mac command
+        cmd = f'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern_base}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2'
 
     result = run_command_with_logging(cmd)
 
