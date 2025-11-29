@@ -145,7 +145,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
                     "PLATFORM: Ubuntu",
                     f"S3_BUCKET_URL: {s3_bucket_url}",
                     f"THEROCK_SDK_URL: {latest_linux_sdk_url}",
-                    f"gpuArchPattern: {linux_arch_pattern}_{gpu_tag}",
+                    f"gpuArchPattern: {gpu_tag}",
                     "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
                     f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
                 ])
@@ -194,7 +194,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
                     "PLATFORM: Windows",
                     f"S3_BUCKET_URL: {s3_bucket_url}",
                     f"THEROCK_SDK_URL: {latest_windows_sdk_url}",
-                    f"gpuArchPattern: {windows_arch_pattern}_{gpu_tag}",
+                    f"gpuArchPattern: {gpu_tag}",
                     "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
                     f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
                 ])
