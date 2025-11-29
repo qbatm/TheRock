@@ -112,63 +112,103 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
 
     if platform.lower() == "linux":
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
-        linux_arch_pattern = "linux-gfx110X-all"
-        latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_pattern)
         
-        if not latest_linux_sdk_url:
-            print("No Linux tarball found; skipping email notification.")
-            return True
+        # Iterate through all GPU architecture patterns in the mapping
+        for linux_arch_pattern, gpu_list in gpu_mapping.items():
+            if not linux_arch_pattern.startswith("linux-"):
+                continue
+                
+            print(f"\nProcessing architecture pattern: {linux_arch_pattern}")
+            latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_pattern)
+            
+            if not latest_linux_sdk_url:
+                print(f"No Linux tarball found for {linux_arch_pattern}; skipping.")
+                continue
 
-        # Get the first GPU from the mapping, with proper error handling
-        gpu_list = gpu_mapping.get("linux-gfx110X-all", [])
-        linux_arch_pattern_maas_tag = gpu_list[0] if gpu_list else ""
+            if not gpu_list:
+                print(f"ERROR: No GPUs found for architecture pattern '{linux_arch_pattern}'")
+                continue
+            
+            # Send an email for each GPU in the list
+            for gpu_tag in gpu_list:
+                print(f"Sending email for GPU: {gpu_tag}")
+                
+                email_body_parts = body_parts.copy()
+                email_body_parts.extend([
+                    "This pipeline includes:",
+                    "• ROCm libraries compilation and testing",
+                    "• PyTorch wheel building and validation",
+                    "• Cross-platform support (Linux & Windows)",
+                    "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
+                    "",
+                    "This notification was sent automatically by TheRock CI pipeline.",
+                    "PLATFORM: Ubuntu",
+                    f"S3_BUCKET_URL: {s3_bucket_url}",
+                    f"THEROCK_SDK_URL: {latest_linux_sdk_url}",
+                    f"gpuArchPattern: {linux_arch_pattern}_{gpu_tag}",
+                    "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
+                    f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
+                ])
+                
+                email_body = "\n".join(email_body_parts)
+                success = send_email(receiver_email, subject, email_body, sender_password, sender_email)
+                
+                if not success:
+                    print(f"Failed to send email for {gpu_tag}")
+                    # Continue with other GPUs even if one fails
         
-        if not linux_arch_pattern_maas_tag:
-            print(f"ERROR: No MAAS tag found for GPU architecture pattern 'linux-gfx110X-all'")
-            return False
-        
-        body_parts.extend([
-            "This pipeline includes:",
-            "• ROCm libraries compilation and testing",
-            "• PyTorch wheel building and validation",
-            "• Cross-platform support (Linux & Windows)",
-            "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
-            "",
-            "This notification was sent automatically by TheRock CI pipeline.",
-            "PLATFORM: Ubuntu",
-            f"S3_BUCKET_URL: {s3_bucket_url}",
-            f"THEROCK_SDK_URL: {latest_linux_sdk_url}",
-            f"gpuArchPattern:  {linux_arch_pattern_maas_tag}",
-            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
-            f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
-        ])
+        return True
+    
     elif platform.lower() == "windows":
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
-        windows_arch_pattern = "windows-gfx110X-all"
-        latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_pattern)
         
-        if not latest_windows_sdk_url:
-            print("No Windows tarball found; skipping email notification.")
-            return True
+        # Iterate through all GPU architecture patterns in the mapping
+        for windows_arch_pattern, gpu_list in gpu_mapping.items():
+            if not windows_arch_pattern.startswith("windows-"):
+                continue
+                
+            print(f"\nProcessing architecture pattern: {windows_arch_pattern}")
+            latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_pattern)
+            
+            if not latest_windows_sdk_url:
+                print(f"No Windows tarball found for {windows_arch_pattern}; skipping.")
+                continue
+
+            if not gpu_list:
+                print(f"ERROR: No GPUs found for architecture pattern '{windows_arch_pattern}'")
+                continue
+            
+            # Send an email for each GPU in the list
+            for gpu_tag in gpu_list:
+                print(f"Sending email for GPU: {gpu_tag}")
+                
+                email_body_parts = body_parts.copy()
+                email_body_parts.extend([
+                    "This pipeline includes:",
+                    "• ROCm libraries compilation and testing",
+                    "• PyTorch wheel building and validation",
+                    "• Cross-platform support (Linux & Windows)",
+                    "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
+                    "",
+                    "This notification was sent automatically by TheRock CI pipeline.",
+                    "PLATFORM: Windows",
+                    f"S3_BUCKET_URL: {s3_bucket_url}",
+                    f"THEROCK_SDK_URL: {latest_windows_sdk_url}",
+                    f"gpuArchPattern: {windows_arch_pattern}_{gpu_tag}",
+                    "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
+                    f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
+                ])
+                
+                email_body = "\n".join(email_body_parts)
+                success = send_email(receiver_email, subject, email_body, sender_password, sender_email)
+                
+                if not success:
+                    print(f"Failed to send email for {gpu_tag}")
+                    # Continue with other GPUs even if one fails
         
-        body_parts.extend([
-            "This pipeline includes:",
-            "• ROCm libraries compilation and testing",
-            "• PyTorch wheel building and validation",
-            "• Cross-platform support (Linux & Windows)",
-            "• Multiple GPU family targets (gfx94X, gfx110X, etc.)",
-            "",
-            "This notification was sent automatically by TheRock CI pipeline.",
-            "PLATFORM: Windows",
-            f"S3_BUCKET_URL: {s3_bucket_url}",
-            f"THEROCK_SDK_URL: {latest_windows_sdk_url}",
-            f"gpuArchPattern: {windows_arch_pattern}",
-            "THEROCK_WHL_URL: https://rocm.nightlies.amd.com/v2/gfx110X-dgpu/",
-            f"GH_COMMIT_ID: {commit_id if commit_id else 'N/A'}"
-        ])       
+        return True
     
-    body = "\n".join(body_parts)
-    return send_email(receiver_email, subject, body, sender_password, sender_email)
+    return True
 
 def run_command_with_logging(cmd: str, timeout: int = None) -> subprocess.CompletedProcess:
     """
