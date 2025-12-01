@@ -95,6 +95,12 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
             # "Navi33 GLXT",      # AMD Radeon PRO W7600 - gfx1102
             # "Navi33 GLXL"       # AMD Radeon PRO W7500 - gfx1102
         ],
+        # "gfx1150-all": [
+        #     "igpu_stx",
+        # ],
+        "gfx1151-all": [
+            "igpu_stxh",
+        ],
         "gfx120X-all": [
             "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
             "gpu_navi48xtx",      # AMD Radeon RX 9070 XT - gfx1201
