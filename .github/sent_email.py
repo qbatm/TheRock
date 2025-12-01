@@ -80,29 +80,29 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
 
 
     gpu_mapping = {
-        "linux-gfx110X-all": [
-            "gpu_navi31xtx",      # AMD Radeon RX 7900 XTX - gfx1100 good
-            "gpu_navi31xt",       # AMD Radeon RX 7900 XT - gfx1100 good
+        "gfx110X-all": [
+            "gpu_navi31xtx",      # AMD Radeon RX 7900 XTX - gfx1100
+            "gpu_navi31xt",       # AMD Radeon RX 7900 XT - gfx1100
             # "gpu_navi31xl",       # AMD Radeon RX 7900 GRE - gfx1100
-            "gpu_navi31xtw",      # AMD Radeon PRO W7900 - gfx1100 good
+            "gpu_navi31xtw",      # AMD Radeon PRO W7900 - gfx1100
             # "Navi 31 XTW-DS",   # AMD Radeon PRO W7900 Dual Slot - gfx1100
             # "Navi 32 XTW",      # AMD Radeon PRO W7800 - gfx1100
             # "Navi 32 XTW 48GB", # AMD Radeon PRO W7800 48GB - gfx1100
-        # "gpu_navi32xtx",      # AMD Radeon RX 7800 XT - gfx1101
-        # "gpu_navi32xl",       # AMD Radeon RX 7700 XT - gfx1101
+            "gpu_navi32xtx",      # AMD Radeon RX 7800 XT - gfx1101
+            "gpu_navi32xl",       # AMD Radeon RX 7700 XT - gfx1101
             # "Navi33",           # AMD Radeon RX 7600 XT / RX 7600 - gfx1102
             # "Navi33 GLXT",      # AMD Radeon PRO W7600 - gfx1102
             # "Navi33 GLXL"       # AMD Radeon PRO W7500 - gfx1102
         ],
-        "linux-gfx120X-all": [
-            "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201 good
-            "gpu_navi48xtx",      # AMD Radeon RX 9070 XT - gfx1201 good
+        "gfx120X-all": [
+            "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
+            "gpu_navi48xtx",      # AMD Radeon RX 9070 XT - gfx1201
             # "gpu_navi48xl",       # AMD Radeon RX 9070 GRE - gfx1201
-        # "gpu_navi48xtw",      # AMD Radeon AI PRO R9700 - gfx1201
-        # "gpu_navi44xl",       # AMD Radeon RX 9060 - gfx1200
-        # "gpu_navi44xt"        # AMD Radeon RX 9060 XT - gfx1200
+            "gpu_navi48xtw",      # AMD Radeon AI PRO R9700 - gfx1201
+            "gpu_navi44xl",       # AMD Radeon RX 9060 - gfx1200
+            "gpu_navi44xt"        # AMD Radeon RX 9060 XT - gfx1200
         ],
-        # "linux-gfx115X-all": [
+        # "gfx115X-all": [
         #     "Radeon 8060S Graphics",  # AMD Ryzen AI Max+ 395 - gfx1151 Strix Halo
         #     "Radeon 8050S Graphics",  # AMD Ryzen AI Max 390/385 - gfx1151 Strix Halo
         #     "AMD Radeon 890M",        # AMD Ryzen AI 9 HX 375/370 - gfx1150 Strix Point
@@ -114,10 +114,10 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
         
         # Iterate through all GPU architecture patterns in the mapping
-        for linux_arch_pattern, gpu_list in gpu_mapping.items():
-            if not linux_arch_pattern.startswith("linux-"):
-                continue
-                
+        for arch_pattern, gpu_list in gpu_mapping.items():
+            # Add platform prefix
+            linux_arch_pattern = f"linux-{arch_pattern}"
+            
             print(f"\nProcessing architecture pattern: {linux_arch_pattern}")
             latest_linux_sdk_url = get_latest_s3_tarball(s3_bucket_url, linux_arch_pattern)
             
@@ -163,10 +163,10 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
         
         # Iterate through all GPU architecture patterns in the mapping
-        for windows_arch_pattern, gpu_list in gpu_mapping.items():
-            if not windows_arch_pattern.startswith("windows-"):
-                continue
-                
+        for arch_pattern, gpu_list in gpu_mapping.items():
+            # Add platform prefix
+            windows_arch_pattern = f"windows-{arch_pattern}"
+            
             print(f"\nProcessing architecture pattern: {windows_arch_pattern}")
             latest_windows_sdk_url = get_latest_s3_tarball(s3_bucket_url, windows_arch_pattern)
             
