@@ -98,7 +98,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         # "gfx1150-all": [
         #     "igpu_stx",
         # ],
-        "gfx1151-all": [
+        "gfx1151": [
             "igpu_stxh",
         ],
         "gfx120X-all": [
