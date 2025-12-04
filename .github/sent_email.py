@@ -81,16 +81,16 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
 
     gpu_mapping = {
         "gfx110X-all": [
-            # "gpu_navi31xtx",      # AMD Radeon RX 7900 XTX - gfx1100
+            "gpu_navi31xtx",      # AMD Radeon RX 7900 XTX - gfx1100
                         # "gpu_navi31xt",       # AMD Radeon RX 7900 XT - gfx1100
                         # "gpu_navi31xl",       # AMD Radeon RX 7900 GRE - gfx1100
             "gpu_navi31xtw",      # AMD Radeon PRO W7900 - gfx1100
                         # "Navi 31 XTW-DS",   # AMD Radeon PRO W7900 Dual Slot - gfx1100
                         # "Navi 32 XTW",      # AMD Radeon PRO W7800 - gfx1100
                         # "Navi 32 XTW 48GB", # AMD Radeon PRO W7800 48GB - gfx1100
-            # "gpu_navi32xtx",      # AMD Radeon RX 7800 XT - gfx1101
-            # "gpu_navi32xl",       # AMD Radeon RX 7700 XT - gfx1101
-            # "gpu_navi33xt",
+            "gpu_navi32xtx",      # AMD Radeon RX 7800 XT - gfx1101
+            "gpu_navi32xl",       # AMD Radeon RX 7700 XT - gfx1101
+            "gpu_navi33xt",
                         # "Navi33",           # AMD Radeon RX 7600 XT / RX 7600 - gfx1102
                         # "Navi33 GLXT",      # AMD Radeon PRO W7600 - gfx1102
                         # "Navi33 GLXL"       # AMD Radeon PRO W7500 - gfx1102
@@ -98,16 +98,16 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
                         # "gfx1150-all": [
                         #     "igpu_stx",
                         # ],
-        # "gfx1151": [
-        #     "igpu_stxh",
-        # ],
+        "gfx1151": [
+            "igpu_stxh",
+        ],
         "gfx120X-all": [
-            # "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
+            "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
             "gpu_navi48xtx",      # AMD Radeon RX 9070 XT - gfx1201
                         # "gpu_navi48xl",       # AMD Radeon RX 9070 GRE - gfx1201
                         # "gpu_navi48xtw",      # AMD Radeon AI PRO R9700 - gfx1201
             "gpu_navi44xl",       # AMD Radeon RX 9060 - gfx1200
-            # "gpu_navi44xt"        # AMD Radeon RX 9060 XT - gfx1200
+            "gpu_navi44xt"        # AMD Radeon RX 9060 XT - gfx1200
         ],
                     # "gfx115X-all": [
                     #     "Radeon 8060S Graphics",  # AMD Ryzen AI Max+ 395 - gfx1151 Strix Halo
