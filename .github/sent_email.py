@@ -82,7 +82,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
     gpu_mapping = {
         "gfx110X-all": [
             "gpu_navi31xtx",      # AMD Radeon RX 7900 XTX - gfx1100
-                        # "gpu_navi31xt",       # AMD Radeon RX 7900 XT - gfx1100
+            "gpu_navi31xt",       # AMD Radeon RX 7900 XT - gfx1100
                         # "gpu_navi31xl",       # AMD Radeon RX 7900 GRE - gfx1100
             "gpu_navi31xtw",      # AMD Radeon PRO W7900 - gfx1100
                         # "Navi 31 XTW-DS",   # AMD Radeon PRO W7900 Dual Slot - gfx1100
