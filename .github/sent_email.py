@@ -289,8 +289,14 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     print("GPU pattern before removing suffix: ", gpu_arch_pattern)
     gpu_arch_pattern_base = gpu_arch_pattern.split("_")[0]  # Use only the part before underscore
     print("GPU pattern after removing suffix: ", gpu_arch_pattern_base)
-
-    print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {gpu_arch_pattern_base}")
+    
+    # Add therock-dist- prefix only for rocm.nightlies.amd.com bucket
+    if "rocm.nightlies.amd.com" in s3_bucket_url:
+        search_pattern = f"therock-dist-{gpu_arch_pattern_base}"
+    else:
+        search_pattern = gpu_arch_pattern_base
+    
+    print(f"Searching for latest tarball in {s3_bucket_url} matching pattern {search_pattern}")
 
     # Build the command to get the latest tarball matching the pattern
     # Extract date suffix (YYYYMMDD) from filenames and sort numerically to get the latest build
@@ -298,10 +304,10 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     # We extract just the date part, sort numerically, then get the corresponding full filename
     if platform.system().lower() == "windows":
         # Windows command using PowerShell
-        cmd = f'powershell -Command "& {{(Invoke-WebRequest -Uri \'{s3_bucket_url}\' -UseBasicParsing).Content | Select-String -Pattern \'<Key>([^<]*{gpu_arch_pattern_base}[^<]*\\.tar\\.gz)</Key>\' -AllMatches | ForEach-Object {{$_.Matches.Groups[1].Value}} | Where-Object {{$_ -notmatch \'ADHOCBUILD\'}} | Sort-Object {{[regex]::Match($_, \'[0-9]{{8}}\').Value}} | Select-Object -Last 1}}"'
+        cmd = f'powershell -Command "& {{(Invoke-WebRequest -Uri \'{s3_bucket_url}\' -UseBasicParsing).Content | Select-String -Pattern \'<Key>([^<]*{search_pattern}[^<]*\\.tar\\.gz)</Key>\' -AllMatches | ForEach-Object {{$_.Matches.Groups[1].Value}} | Where-Object {{$_ -notmatch \'ADHOCBUILD\'}} | Sort-Object {{[regex]::Match($_, \'[0-9]{{8}}\').Value}} | Select-Object -Last 1}}"'
     else:
         # Linux/Mac command
-        cmd = f'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{gpu_arch_pattern_base}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2'
+        cmd = f'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{search_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2'
 
     result = run_command_with_logging(cmd)
 
