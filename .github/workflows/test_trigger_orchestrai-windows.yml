@@ -23,6 +23,10 @@ permissions:
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
   JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test"
+  BUILDS_JSON: ""
+  CUSTOM_TEST_QUERIES: ""
+  POLLING_INTERVAL: 30
+  TIMEOUT_MINUTES: 60
 
 jobs:
   setup:
@@ -101,8 +105,6 @@ jobs:
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          BUILDS_JSON: ${{ inputs.builds_json }}
-          CUSTOM_TEST_QUERIES: ${{ inputs.custom_test_queries }}
         run: |
           echo "Triggering Jenkins job: ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}"
 
@@ -199,8 +201,8 @@ jobs:
           BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
           echo "Polling Jenkins build: ${BUILD_URL}"
 
-          POLLING_INTERVAL=${{ inputs.polling_interval }}
-          TIMEOUT_SECONDS=$(( ${{ inputs.timeout_minutes }} * 60 ))
+          POLLING_INTERVAL=${{ env.POLLING_INTERVAL }}
+          TIMEOUT_SECONDS=$(( ${{ env.TIMEOUT_MINUTES }} * 60 ))
           START_TIME=$(date +%s)
 
           while true; do
