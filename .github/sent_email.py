@@ -118,7 +118,6 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
     }
 
     if platform.lower() == "linux":
-        return True
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
         
         # Iterate through all GPU architecture patterns in the mapping
