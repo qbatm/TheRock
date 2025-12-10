@@ -16,15 +16,21 @@ on:
         description: 'Simulate Windows build failure'
         type: boolean
         default: false
+      sdk_url_override:
+        description: 'Override SDK URL (skips S3 lookup)'
+        type: string
+        default: ''
+      pool_type:
+        description: 'Jenkins agent pool type'
+        type: string
+        default: 'ucicd_production_hot_machines'
 
 permissions:
   contents: read
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test"
-  BUILDS_JSON: ""
-  CUSTOM_TEST_QUERIES: ""
+  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
   POLLING_INTERVAL: 30
   TIMEOUT_MINUTES: 60
 
@@ -100,207 +106,370 @@ jobs:
     runs-on: arc-lnx-pub
     environment: ucicd
     steps:
-      - name: Trigger Jenkins Job
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Generate Jenkins trigger parameters
+        id: generate_params
+        run: |
+          echo "Generating Jenkins trigger parameters for Windows..."
+
+          # Build the command with optional parameters
+          CMD="python build_tools/trigger_jenkins.py --mode generate --platform windows --commit-id ${{ github.sha }}"
+
+          # Add SDK URL override if provided
+          if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
+            CMD="$CMD --sdk-url \"${{ inputs.sdk_url_override }}\""
+          fi
+
+          # Add pool type if provided
+          if [[ -n "${{ inputs.pool_type }}" ]]; then
+            CMD="$CMD --pool-type \"${{ inputs.pool_type }}\""
+          fi
+
+          # Add GitHub output file
+          CMD="$CMD --github-output $GITHUB_OUTPUT"
+
+          echo "Running: $CMD"
+          eval $CMD
+
+          echo "✅ Parameters generated successfully"
+
+      - name: Trigger Jenkins Jobs
         id: trigger
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
         run: |
-          echo "Triggering Jenkins job: ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}"
+          echo "Triggering Jenkins jobs based on generated configurations..."
 
-          # URL-encode the parameters using jq
-          ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
-          ENCODED_TEST_QUERIES=$(jq -rn --arg str "${CUSTOM_TEST_QUERIES}" '$str|@uri')
+          # Parse the trigger configs from the previous step
+          TRIGGER_CONFIGS='${{ steps.generate_params.outputs.trigger_configs }}'
+          TRIGGER_COUNT='${{ steps.generate_params.outputs.trigger_count }}'
 
-          # Trigger the parameterized job and capture the queue location from response headers
-          RESPONSE=$(curl -s -i -X POST \
-            --user "${UCICD_USER}:${UCICD_TOKEN}" \
-            "${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/buildWithParameters?BUILDS_JSON=${ENCODED_BUILDS_JSON}&CUSTOM_TEST_QUERIES=${ENCODED_TEST_QUERIES}")
+          echo "Number of configurations to trigger: ${TRIGGER_COUNT}"
 
-          # Extract the queue URL from Location header
-          QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
+          # Initialize arrays to track queue URLs and build info
+          QUEUE_URLS=()
+          BUILD_INFOS=()
 
-          if [ -z "$QUEUE_URL" ]; then
-            echo "::error::Failed to get queue URL from Jenkins response"
-            echo "Response: $RESPONSE"
-            exit 1
-          fi
+          # Process each configuration
+          for i in $(seq 0 $((TRIGGER_COUNT - 1))); do
+            # Extract the builds_json for this configuration using jq
+            BUILDS_JSON=$(echo "$TRIGGER_CONFIGS" | jq -r ".[$i].builds_json")
+            GPU_TAG=$(echo "$TRIGGER_CONFIGS" | jq -r ".[$i].gpu_tag")
 
-          echo "Queue URL: $QUEUE_URL"
-          echo "queue_url=${QUEUE_URL}" >> $GITHUB_OUTPUT
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "[$((i+1))/${TRIGGER_COUNT}] Triggering Jenkins for: ${GPU_TAG}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "BUILDS_JSON: ${BUILDS_JSON}"
 
-          echo "### Jenkins Job Triggered 🚀" >> $GITHUB_STEP_SUMMARY
+            # URL-encode the BUILDS_JSON parameter
+            ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
+
+            # Trigger the parameterized job
+            RESPONSE=$(curl -s -i -X POST \
+              --user "${UCICD_USER}:${UCICD_TOKEN}" \
+              "${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/buildWithParameters?BUILDS_JSON=${ENCODED_BUILDS_JSON}")
+
+            # Extract the queue URL from Location header
+            QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
+
+            if [ -z "$QUEUE_URL" ]; then
+              echo "::warning::Failed to get queue URL for ${GPU_TAG}"
+              echo "Response: $RESPONSE"
+              continue
+            fi
+
+            echo "Queue URL: ${QUEUE_URL}"
+            QUEUE_URLS+=("${QUEUE_URL}")
+            BUILD_INFOS+=("{\"gpu_tag\":\"${GPU_TAG}\",\"queue_url\":\"${QUEUE_URL}\"}")
+          done
+
+          # Output queue URLs as JSON array
+          echo "queue_urls=$(printf '%s\n' "${QUEUE_URLS[@]}" | jq -R . | jq -s .)" >> $GITHUB_OUTPUT
+          echo "build_infos=[$(IFS=,; echo "${BUILD_INFOS[*]}")]" >> $GITHUB_OUTPUT
+          echo "trigger_count=${#QUEUE_URLS[@]}" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "### Jenkins Jobs Triggered 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Jenkins URL:** ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Queue URL:** ${QUEUE_URL}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Parameters:**" >> $GITHUB_STEP_SUMMARY
-          echo "  - BUILDS_JSON: \`${BUILDS_JSON}\`" >> $GITHUB_STEP_SUMMARY
-          echo "  - CUSTOM_TEST_QUERIES: \`${CUSTOM_TEST_QUERIES}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total jobs triggered:** ${#QUEUE_URLS[@]}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit ID:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Configurations:" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo "${TRIGGER_CONFIGS}" | jq '.' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - name: Wait for Build Number
-        id: get_build_number
+      - name: Wait for Build Numbers
+        id: get_build_numbers
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
         run: |
-          QUEUE_URL="${{ steps.trigger.outputs.queue_url }}"
+          BUILD_INFOS='${{ steps.trigger.outputs.build_infos }}'
 
-          echo "Waiting for build to be assigned a build number..."
+          echo "Waiting for build numbers to be assigned..."
 
-          # Poll the queue until we get a build number (max 5 minutes)
-          MAX_ATTEMPTS=60
-          ATTEMPT=0
-          BUILD_NUMBER=""
+          # Parse and iterate through each build info
+          BUILD_COUNT=$(echo "$BUILD_INFOS" | jq 'length')
+          FINAL_BUILD_INFOS=()
 
-          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-            QUEUE_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
-              "${QUEUE_URL}api/json")
+          for i in $(seq 0 $((BUILD_COUNT - 1))); do
+            GPU_TAG=$(echo "$BUILD_INFOS" | jq -r ".[$i].gpu_tag")
+            QUEUE_URL=$(echo "$BUILD_INFOS" | jq -r ".[$i].queue_url")
 
-            # Check if build has started (executable field will be populated) using jq
-            BUILD_NUMBER=$(echo "$QUEUE_INFO" | jq -r '.executable.number // empty')
+            echo ""
+            echo "[$((i+1))/${BUILD_COUNT}] Waiting for build number: ${GPU_TAG}"
 
-            if [ -n "$BUILD_NUMBER" ]; then
-              echo "Build number: $BUILD_NUMBER"
-              break
+            # Poll the queue until we get a build number (max 5 minutes per job)
+            MAX_ATTEMPTS=60
+            ATTEMPT=0
+            BUILD_NUMBER=""
+
+            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+              QUEUE_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+                "${QUEUE_URL}api/json")
+
+              BUILD_NUMBER=$(echo "$QUEUE_INFO" | jq -r '.executable.number // empty')
+
+              if [ -n "$BUILD_NUMBER" ]; then
+                echo "Build number for ${GPU_TAG}: ${BUILD_NUMBER}"
+                break
+              fi
+
+              CANCELLED=$(echo "$QUEUE_INFO" | jq -r '.cancelled // false')
+              if [ "$CANCELLED" = "true" ]; then
+                echo "::warning::Build for ${GPU_TAG} was cancelled in queue"
+                BUILD_NUMBER="CANCELLED"
+                break
+              fi
+
+              ATTEMPT=$((ATTEMPT + 1))
+              echo "Waiting... (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+              sleep 5
+            done
+
+            if [ -z "$BUILD_NUMBER" ]; then
+              echo "::warning::Timed out waiting for build number for ${GPU_TAG}"
+              BUILD_NUMBER="TIMEOUT"
             fi
 
-            # Check if cancelled using jq
-            CANCELLED=$(echo "$QUEUE_INFO" | jq -r '.cancelled // false')
-
-            if [ "$CANCELLED" = "true" ]; then
-              echo "::error::Jenkins build was cancelled in queue"
-              exit 1
-            fi
-
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Waiting for build to start (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
-            sleep 5
+            BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+            FINAL_BUILD_INFOS+=("{\"gpu_tag\":\"${GPU_TAG}\",\"build_number\":\"${BUILD_NUMBER}\",\"build_url\":\"${BUILD_URL}\"}")
           done
 
-          if [ -z "$BUILD_NUMBER" ]; then
-            echo "::error::Timed out waiting for build number"
-            exit 1
-          fi
-
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-
-          echo "build_number=${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+          echo "final_build_infos=[$(IFS=,; echo "${FINAL_BUILD_INFOS[*]}")]" >> $GITHUB_OUTPUT
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Number:** ${BUILD_NUMBER}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build URL:** [View in Jenkins](${BUILD_URL})" >> $GITHUB_STEP_SUMMARY
+          echo "#### Build Numbers:" >> $GITHUB_STEP_SUMMARY
+          echo "| GPU Tag | Build Number | Build URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------------|-----------|" >> $GITHUB_STEP_SUMMARY
+
+          for info in "${FINAL_BUILD_INFOS[@]}"; do
+            GPU=$(echo "$info" | jq -r '.gpu_tag')
+            NUM=$(echo "$info" | jq -r '.build_number')
+            URL=$(echo "$info" | jq -r '.build_url')
+            echo "| ${GPU} | ${NUM} | [View](${URL}) |" >> $GITHUB_STEP_SUMMARY
+          done
 
       - name: Poll Jenkins for Completion
         id: poll
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-          echo "Polling Jenkins build: ${BUILD_URL}"
+          FINAL_BUILD_INFOS='${{ steps.get_build_numbers.outputs.final_build_infos }}'
+
+          echo "Polling Jenkins builds for completion..."
 
           POLLING_INTERVAL=${{ env.POLLING_INTERVAL }}
           TIMEOUT_SECONDS=$(( ${{ env.TIMEOUT_MINUTES }} * 60 ))
           START_TIME=$(date +%s)
 
-          while true; do
+          # Get list of builds to monitor (exclude CANCELLED and TIMEOUT)
+          BUILDS_TO_MONITOR=$(echo "$FINAL_BUILD_INFOS" | jq '[.[] | select(.build_number != "CANCELLED" and .build_number != "TIMEOUT")]')
+          BUILD_COUNT=$(echo "$BUILDS_TO_MONITOR" | jq 'length')
+
+          if [ "$BUILD_COUNT" -eq 0 ]; then
+            echo "::error::No valid builds to monitor"
+            exit 1
+          fi
+
+          # Track completion status for each build
+          declare -A BUILD_STATUS
+          declare -A BUILD_DURATION
+          COMPLETED_COUNT=0
+
+          while [ $COMPLETED_COUNT -lt $BUILD_COUNT ]; do
             CURRENT_TIME=$(date +%s)
             ELAPSED=$((CURRENT_TIME - START_TIME))
 
             if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
-              echo "::error::Timeout waiting for Jenkins job to complete"
+              echo "::error::Timeout waiting for Jenkins jobs to complete"
               exit 1
             fi
 
-            BUILD_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
-              "${BUILD_URL}/api/json")
+            for i in $(seq 0 $((BUILD_COUNT - 1))); do
+              GPU_TAG=$(echo "$BUILDS_TO_MONITOR" | jq -r ".[$i].gpu_tag")
+              BUILD_NUMBER=$(echo "$BUILDS_TO_MONITOR" | jq -r ".[$i].build_number")
 
-            # Check if build is still running using jq
-            # Use 'if .building then "true" else "false" end' to ensure consistent string output
-            BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
+              # Skip if already completed
+              if [ -n "${BUILD_STATUS[$GPU_TAG]}" ]; then
+                continue
+              fi
 
-            if [ "$BUILDING" = "false" ]; then
-              echo "Jenkins build completed!"
+              BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
 
-              # Extract result using jq
-              RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
+              BUILD_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+                "${BUILD_URL}/api/json")
 
-              # Extract duration and convert to seconds using jq
-              DURATION_MS=$(echo "$BUILD_INFO" | jq -r '.duration // 0')
-              DURATION_SEC=$((DURATION_MS / 1000))
+              BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
 
-              echo "result=${RESULT}" >> $GITHUB_OUTPUT
-              echo "duration=${DURATION_SEC}s" >> $GITHUB_OUTPUT
-              break
+              if [ "$BUILDING" = "false" ]; then
+                RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
+                DURATION_MS=$(echo "$BUILD_INFO" | jq -r '.duration // 0')
+                DURATION_SEC=$((DURATION_MS / 1000))
+
+                echo "✓ ${GPU_TAG} completed: ${RESULT} (${DURATION_SEC}s)"
+                BUILD_STATUS[$GPU_TAG]=$RESULT
+                BUILD_DURATION[$GPU_TAG]="${DURATION_SEC}s"
+                COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
+              fi
+            done
+
+            echo "Progress: ${COMPLETED_COUNT}/${BUILD_COUNT} builds completed (elapsed: ${ELAPSED}s)"
+
+            if [ $COMPLETED_COUNT -lt $BUILD_COUNT ]; then
+              sleep $POLLING_INTERVAL
+            fi
+          done
+
+          echo "All Jenkins builds completed!"
+
+          # Build results JSON
+          RESULTS="["
+          FIRST=true
+          ALL_SUCCESS=true
+
+          for i in $(seq 0 $((BUILD_COUNT - 1))); do
+            GPU_TAG=$(echo "$BUILDS_TO_MONITOR" | jq -r ".[$i].gpu_tag")
+            BUILD_NUMBER=$(echo "$BUILDS_TO_MONITOR" | jq -r ".[$i].build_number")
+
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              RESULTS+=","
             fi
 
-            echo "Build still running... (elapsed: ${ELAPSED}s)"
-            sleep $POLLING_INTERVAL
+            RESULTS+="{\"gpu_tag\":\"${GPU_TAG}\",\"build_number\":\"${BUILD_NUMBER}\",\"result\":\"${BUILD_STATUS[$GPU_TAG]}\",\"duration\":\"${BUILD_DURATION[$GPU_TAG]}\"}"
+
+            if [ "${BUILD_STATUS[$GPU_TAG]}" != "SUCCESS" ]; then
+              ALL_SUCCESS=false
+            fi
           done
+
+          RESULTS+="]"
+
+          echo "results=${RESULTS}" >> $GITHUB_OUTPUT
+          echo "all_success=${ALL_SUCCESS}" >> $GITHUB_OUTPUT
 
       - name: Fetch Jenkins Console Output
         id: console
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-          echo "Fetching console output from Jenkins..."
+          RESULTS='${{ steps.poll.outputs.results }}'
 
-          # Get console output (last 100 lines to keep it manageable)
-          curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
-            "${BUILD_URL}/consoleText" | tail -100 > jenkins_console.txt
+          echo "Fetching console output from Jenkins builds..."
 
-          echo "Console output saved"
+          mkdir -p jenkins_logs
+
+          BUILD_COUNT=$(echo "$RESULTS" | jq 'length')
+
+          for i in $(seq 0 $((BUILD_COUNT - 1))); do
+            GPU_TAG=$(echo "$RESULTS" | jq -r ".[$i].gpu_tag")
+            BUILD_NUMBER=$(echo "$RESULTS" | jq -r ".[$i].build_number")
+
+            BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+
+            echo "Fetching logs for ${GPU_TAG} (build ${BUILD_NUMBER})..."
+
+            curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+              "${BUILD_URL}/consoleText" | tail -100 > "jenkins_logs/${GPU_TAG}_console.txt"
+          done
+
+          echo "Console outputs saved to jenkins_logs/"
 
       - name: Write Job Summary
-        env:
-          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-          RESULT="${{ steps.poll.outputs.result }}"
-          DURATION="${{ steps.poll.outputs.duration }}"
+          RESULTS='${{ steps.poll.outputs.results }}'
+          ALL_SUCCESS='${{ steps.poll.outputs.all_success }}'
 
-          # Determine status emoji
-          case "$RESULT" in
-            SUCCESS)
-              STATUS_EMOJI="✅"
-              ;;
-            FAILURE)
-              STATUS_EMOJI="❌"
-              ;;
-            UNSTABLE)
-              STATUS_EMOJI="⚠️"
-              ;;
-            ABORTED)
-              STATUS_EMOJI="🛑"
-              ;;
-            *)
-              STATUS_EMOJI="❓"
-              ;;
-          esac
+          BUILD_COUNT=$(echo "$RESULTS" | jq 'length')
 
-          echo "## Jenkins Job Results ${STATUS_EMOJI}" >> $GITHUB_STEP_SUMMARY
+          echo "## Jenkins Job Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build Number** | ${BUILD_NUMBER} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Result** | ${RESULT} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Duration** | ${DURATION} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build URL** | [View in Jenkins](${BUILD_URL}) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Console Output (last 100 lines)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat jenkins_console.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
 
-          # Fail the workflow if Jenkins job failed
-          if [ "$RESULT" != "SUCCESS" ]; then
-            echo "::error::Jenkins job finished with result: ${RESULT}"
+          if [ "$ALL_SUCCESS" = "true" ]; then
+            echo "### ✅ All builds succeeded!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Some builds failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| GPU Tag | Build Number | Result | Duration |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+
+          for i in $(seq 0 $((BUILD_COUNT - 1))); do
+            GPU_TAG=$(echo "$RESULTS" | jq -r ".[$i].gpu_tag")
+            BUILD_NUMBER=$(echo "$RESULTS" | jq -r ".[$i].build_number")
+            RESULT=$(echo "$RESULTS" | jq -r ".[$i].result")
+            DURATION=$(echo "$RESULTS" | jq -r ".[$i].duration")
+
+            case "$RESULT" in
+              SUCCESS) EMOJI="✅" ;;
+              FAILURE) EMOJI="❌" ;;
+              UNSTABLE) EMOJI="⚠️" ;;
+              ABORTED) EMOJI="🛑" ;;
+              *) EMOJI="❓" ;;
+            esac
+
+            BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+            echo "| ${GPU_TAG} | [${BUILD_NUMBER}](${BUILD_URL}) | ${EMOJI} ${RESULT} | ${DURATION} |" >> $GITHUB_STEP_SUMMARY
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Console Output (last 100 lines per build)" >> $GITHUB_STEP_SUMMARY
+
+          for i in $(seq 0 $((BUILD_COUNT - 1))); do
+            GPU_TAG=$(echo "$RESULTS" | jq -r ".[$i].gpu_tag")
+
+            if [ -f "jenkins_logs/${GPU_TAG}_console.txt" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary><b>${GPU_TAG}</b></summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              cat "jenkins_logs/${GPU_TAG}_console.txt" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          # Fail the workflow if any Jenkins job failed
+          if [ "$ALL_SUCCESS" != "true" ]; then
+            echo "::error::One or more Jenkins jobs failed"
             exit 1
           fi
 
