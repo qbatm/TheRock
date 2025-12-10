@@ -191,7 +191,6 @@ jobs:
 
       - name: Poll Jenkins for Completion
         id: poll
-        if: ${{ inputs.wait_for_result }}
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
@@ -241,7 +240,6 @@ jobs:
 
       - name: Fetch Jenkins Console Output
         id: console
-        if: ${{ inputs.wait_for_result }}
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
@@ -257,7 +255,6 @@ jobs:
           echo "Console output saved"
 
       - name: Write Job Summary
-        if: ${{ inputs.wait_for_result }}
         env:
           BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
