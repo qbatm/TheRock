@@ -306,9 +306,9 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
         escaped_pattern = search_pattern.replace("[", "`[").replace("]", "`]")
         cmd = f'powershell -Command "$content = (Invoke-WebRequest -Uri \'{s3_bucket_url}\' -UseBasicParsing).Content; $content | Select-String -Pattern \'<Key>([^<]*{escaped_pattern}[^<]*\\.tar\\.gz)</Key>\' -AllMatches | ForEach-Object {{$_.Matches.Groups[1].Value}} | Where-Object {{$_ -notmatch \'ADHOCBUILD\'}} | Sort-Object {{[regex]::Match($_, \'[0-9]{{8}}\').Value}} | Select-Object -Last 1"'
     else:
-        # Linux/Mac command - handle both XML format and JavaScript array format
-        # Try JSON "name": format first (for rocm.nightlies.amd.com), fall back to XML <Key> format
-        cmd = f'curl -s "{s3_bucket_url}" | grep -oP \'(?<="name": ")[^"]*{search_pattern}[^"]*\\.tar\\.gz(?=")\' | grep -v "ADHOCBUILD" | awk \'{{match($0, /[0-9]{{8}}/); print substr($0, RSTART, 8), $0}}\' | sort -k1 -n | tail -1 | cut -d" " -f2'
+        # Linux/Mac command - handle both XML format (S3 AWS) and JavaScript array format (rocm.nightlies.amd.com)
+        # Use grep -oP with alternation to match either <Key>...</Key> or "name": "..."
+        cmd = f'curl -s "{s3_bucket_url}" | grep -oP \'(?<=<Key>)[^<]*{search_pattern}[^<]*\\.tar\\.gz(?=</Key>)|(?<="name": ")[^"]*{search_pattern}[^"]*\\.tar\\.gz(?=")\' | grep -v "ADHOCBUILD" | awk \'{{match($0, /[0-9]{{8}}/); print substr($0, RSTART, 8), $0}}\' | sort -k1 -n | tail -1 | cut -d" " -f2'
 
     result = run_command_with_logging(cmd)
 
