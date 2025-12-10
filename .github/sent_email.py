@@ -118,6 +118,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
     }
 
     if platform.lower() == "linux":
+        return True
         s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
         
         # Iterate through all GPU architecture patterns in the mapping
@@ -165,7 +166,7 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
         return True
     
     elif platform.lower() == "windows":
-        s3_bucket_url = "https://therock-nightly-tarball.s3.amazonaws.com/"
+        s3_bucket_url = "https://rocm.nightlies.amd.com/tarball/"
         
         # Iterate through all GPU architecture patterns in the mapping
         for arch_pattern, gpu_list in gpu_mapping.items():
