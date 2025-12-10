@@ -16,9 +16,23 @@ on:
         description: 'Simulate Linux build failure'
         type: boolean
         default: false
+      sdk_url_override:
+        description: 'Override SDK URL (skips S3 lookup)'
+        type: string
+        default: ''
+      pool_type:
+        description: 'Jenkins agent pool type'
+        type: string
+        default: 'ucicd_production_hot_machines'
 
 permissions:
   contents: read
+
+env:
+  JENKINS_URL: "https://ucicd-jenkins.amd.com"
+  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
+  POLLING_INTERVAL: 30
+  TIMEOUT_MINUTES: 60
 
 jobs:
   setup:
@@ -56,12 +70,12 @@ jobs:
           echo "Building torch, torchvision, torchaudio wheels..."
           echo "Target: gfx110X-dgpu"
           sleep 2
-          
+
           if [[ "${{ inputs.simulate_linux_failure }}" == "true" ]]; then
             echo "❌ Simulated Linux build failure"
             exit 1
           fi
-          
+
           echo "✅ PyTorch wheels built successfully"
 
       - name: Mock Library Tests
@@ -81,15 +95,15 @@ jobs:
           echo "❌ Simulating a general pipeline failure"
           exit 1
 
-  ci_summary:
-    name: CI Summary with Email Notification
+  trigger-jenkins:
+    name: Trigger Jenkins Job
     if: always()
     needs:
       - setup
       - mock_linux_build_and_test
       - mock_general_failure
-    runs-on: ubuntu-24.04
-    environment: email_creds
+    runs-on: arc-lnx-pub
+    environment: ucicd
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -99,80 +113,238 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Analyze mock pipeline results
+      - name: Generate Jenkins trigger parameters
+        id: generate_params
         run: |
-          echo "📊 Analyzing mock TheRock pipeline results..."
-          echo '${{ toJson(needs) }}'
-          
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
-            | jq --raw-output \
-            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
-          )"
-          
-          echo "Failed jobs detected: '$FAILED_JOBS'"
-          
-          # Set pipeline status and details
-          if [[ "${FAILED_JOBS}" != "" ]]; then
-            echo "PIPELINE_STATUS=failure" >> "$GITHUB_ENV"
-            echo "FAILED_JOBS=${FAILED_JOBS}" >> "$GITHUB_ENV"
-            echo "PIPELINE_DETAILS=Mock pipeline test - The following jobs failed: ${FAILED_JOBS}" >> "$GITHUB_ENV"
-            echo "❌ Mock pipeline failed. Jobs that failed: ${FAILED_JOBS}"
-          else
-            echo "PIPELINE_STATUS=success" >> "$GITHUB_ENV"
-            echo "FAILED_JOBS=" >> "$GITHUB_ENV"
-            echo "PIPELINE_DETAILS=Mock pipeline test - All ROCm libraries and PyTorch wheels built and tested successfully!" >> "$GITHUB_ENV"
-            echo "✅ Mock pipeline completed successfully!"
+          echo "Generating Jenkins trigger parameters for Linux..."
+
+          # Build the command with optional parameters
+          CMD="python build_tools/trigger_jenkins.py --mode generate --platform linux --commit-id ${{ github.sha }}"
+
+          # Add SDK URL override if provided
+          if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
+            CMD="$CMD --sdk-url \"${{ inputs.sdk_url_override }}\""
           fi
 
-      - name: Send mock pipeline completion email
-        if: always()
-        env:
-          RECIPIENT_EMAIL: \"${{secrets.RECEIVER_EMAIL}}\"
-        run: |
-          echo "📧 Sending mock pipeline completion email..."
-         
-          # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Linux --commit-id \"${{ github.event.pull_request.head.sha }}\""
-          
-          # Add failed-jobs only if there are any
-          if [[ -n "$FAILED_JOBS" ]]; then
-            CMD="$CMD --failed-jobs \"$FAILED_JOBS\""
+          # Add pool type if provided
+          if [[ -n "${{ inputs.pool_type }}" ]]; then
+            CMD="$CMD --pool-type \"${{ inputs.pool_type }}\""
           fi
-          
-          echo "Executing: $CMD"
-          
-          # Execute the command
+
+          # Add GitHub output file
+          CMD="$CMD --github-output $GITHUB_OUTPUT"
+
+          echo "Running: $CMD"
           eval $CMD
-          
-          echo "✅ Email notification sent!"
 
-      - name: Display test summary
-        if: always()
+          echo "✅ Parameters generated successfully"
+
+      - name: Trigger Jenkins Job
+        id: trigger
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_USER }}
         run: |
-          echo "🎭 Mock TheRock Pipeline Test Summary"
-          echo "======================================"
-          echo "Pipeline Status: $PIPELINE_STATUS"
-          echo "Failed Jobs: $FAILED_JOBS"
-          echo "Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo ""
-          echo "📧 Email notification has been sent to email."
-          echo ""
-          echo "This was a test run of the email notification system."
-          echo "The actual TheRock pipeline will work the same way when it completes."
+          echo "Triggering Jenkins job: ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}"
 
+          # Get the first trigger config (for now, we trigger one job at a time)
+          TRIGGER_CONFIGS='${{ steps.generate_params.outputs.trigger_configs }}'
+          BUILDS_JSON=$(echo "$TRIGGER_CONFIGS" | jq -r '.[0].builds_json')
 
+          echo "BUILDS_JSON: ${BUILDS_JSON}"
 
+          # URL-encode the parameters using jq
+          ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
 
+          # Trigger the parameterized job using the remote trigger token
+          # This bypasses CSRF protection and is the same method the old workflow used
+          RESPONSE=$(curl -s -i -X POST \
+            --user "${UCICD_USER}:${UCICD_TOKEN}" \
+            "${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/buildWithParameters?token=${JENKINS_TRIGGER_TOKEN}&BUILDS_JSON=${ENCODED_BUILDS_JSON}")
 
+          # Extract the queue URL from Location header
+          QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
 
+          if [ -z "$QUEUE_URL" ]; then
+            echo "::error::Failed to get queue URL from Jenkins response"
+            echo "Response:"
+            echo "$RESPONSE" | head -30
+            exit 1
+          fi
 
+          echo "Queue URL: $QUEUE_URL"
+          echo "queue_url=${QUEUE_URL}" >> $GITHUB_OUTPUT
 
+          echo "### Jenkins Job Triggered 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Jenkins URL:** ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Queue URL:** ${QUEUE_URL}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Parameters:**" >> $GITHUB_STEP_SUMMARY
+          echo "  - BUILDS_JSON: \`${BUILDS_JSON}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
 
+      - name: Wait for Build Number
+        id: get_build_number
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+        run: |
+          QUEUE_URL="${{ steps.trigger.outputs.queue_url }}"
 
+          echo "Waiting for build to be assigned a build number..."
 
+          # Poll the queue until we get a build number (max 5 minutes)
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          BUILD_NUMBER=""
 
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            QUEUE_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+              "${QUEUE_URL}api/json")
 
+            # Check if build has started (executable field will be populated) using jq
+            BUILD_NUMBER=$(echo "$QUEUE_INFO" | jq -r '.executable.number // empty')
 
+            if [ -n "$BUILD_NUMBER" ]; then
+              echo "Build number: $BUILD_NUMBER"
+              break
+            fi
 
+            # Check if cancelled using jq
+            CANCELLED=$(echo "$QUEUE_INFO" | jq -r '.cancelled // false')
 
+            if [ "$CANCELLED" = "true" ]; then
+              echo "::error::Jenkins build was cancelled in queue"
+              exit 1
+            fi
 
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Waiting for build to start (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+            sleep 5
+          done
+
+          if [ -z "$BUILD_NUMBER" ]; then
+            echo "::error::Timed out waiting for build number"
+            exit 1
+          fi
+
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+
+          echo "build_number=${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Number:** ${BUILD_NUMBER}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build URL:** [View in Jenkins](${BUILD_URL})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Poll Jenkins for Completion
+        id: poll
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          echo "Polling Jenkins build: ${BUILD_URL}"
+
+          POLLING_INTERVAL=${{ env.POLLING_INTERVAL }}
+          TIMEOUT_SECONDS=$(( ${{ env.TIMEOUT_MINUTES }} * 60 ))
+          START_TIME=$(date +%s)
+
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+
+            if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
+              echo "::error::Timeout waiting for Jenkins job to complete"
+              exit 1
+            fi
+
+            BUILD_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+              "${BUILD_URL}/api/json")
+
+            # Check if build is still running using jq
+            BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
+
+            if [ "$BUILDING" = "false" ]; then
+              echo "Jenkins build completed!"
+
+              # Extract result using jq
+              RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
+
+              # Extract duration and convert to seconds using jq
+              DURATION_MS=$(echo "$BUILD_INFO" | jq -r '.duration // 0')
+              DURATION_SEC=$((DURATION_MS / 1000))
+
+              echo "result=${RESULT}" >> $GITHUB_OUTPUT
+              echo "duration=${DURATION_SEC}s" >> $GITHUB_OUTPUT
+              break
+            fi
+
+            echo "Build still running... (elapsed: ${ELAPSED}s)"
+            sleep $POLLING_INTERVAL
+          done
+
+      - name: Fetch Jenkins Console Output
+        id: console
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          echo "Fetching console output from Jenkins..."
+
+          # Get console output (last 100 lines to keep it manageable)
+          curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+            "${BUILD_URL}/consoleText" | tail -100 > jenkins_console.txt
+
+          echo "Console output saved"
+
+      - name: Write Job Summary
+        env:
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          RESULT="${{ steps.poll.outputs.result }}"
+          DURATION="${{ steps.poll.outputs.duration }}"
+
+          # Determine status emoji
+          case "$RESULT" in
+            SUCCESS)
+              STATUS_EMOJI="✅"
+              ;;
+            FAILURE)
+              STATUS_EMOJI="❌"
+              ;;
+            UNSTABLE)
+              STATUS_EMOJI="⚠️"
+              ;;
+            ABORTED)
+              STATUS_EMOJI="🛑"
+              ;;
+            *)
+              STATUS_EMOJI="❓"
+              ;;
+          esac
+
+          echo "## Jenkins Job Results ${STATUS_EMOJI}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Build Number** | ${BUILD_NUMBER} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Result** | ${RESULT} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Duration** | ${DURATION} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Build URL** | [View in Jenkins](${BUILD_URL}) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Console Output (last 100 lines)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat jenkins_console.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Fail the workflow if Jenkins job failed
+          if [ "$RESULT" != "SUCCESS" ]; then
+            echo "::error::Jenkins job finished with result: ${RESULT}"
+            exit 1
+          fi
