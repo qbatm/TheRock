@@ -303,11 +303,13 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     # Date format in filenames: 7.10.0a20251113 or 7.9.0rc20251008 (8 digits at the end before .tar.gz)
     # We extract just the date part, sort numerically, then get the corresponding full filename
     if platform.system().lower() == "windows":
-        # Windows command using PowerShell
-        cmd = f'powershell -Command "& {{(Invoke-WebRequest -Uri \'{s3_bucket_url}\' -UseBasicParsing).Content | Select-String -Pattern \'<Key>([^<]*{search_pattern}[^<]*\\.tar\\.gz)</Key>\' -AllMatches | ForEach-Object {{$_.Matches.Groups[1].Value}} | Where-Object {{$_ -notmatch \'ADHOCBUILD\'}} | Sort-Object {{[regex]::Match($_, \'[0-9]{{8}}\').Value}} | Select-Object -Last 1}}"'
+        # Windows command using PowerShell - escape pattern for PowerShell
+        escaped_pattern = search_pattern.replace("[", "`[").replace("]", "`]")
+        cmd = f'powershell -Command "$content = (Invoke-WebRequest -Uri \'{s3_bucket_url}\' -UseBasicParsing).Content; $content | Select-String -Pattern \'<Key>([^<]*{escaped_pattern}[^<]*\\.tar\\.gz)</Key>\' -AllMatches | ForEach-Object {{$_.Matches.Groups[1].Value}} | Where-Object {{$_ -notmatch \'ADHOCBUILD\'}} | Sort-Object {{[regex]::Match($_, \'[0-9]{{8}}\').Value}} | Select-Object -Last 1"'
     else:
-        # Linux/Mac command
-        cmd = f'curl -s "{s3_bucket_url}" | grep -oP "(?<=<Key>)[^<]*{search_pattern}[^<]*\\.tar\\.gz(?=</Key>)" | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2'
+        # Linux/Mac command - handle both XML format and JavaScript array format
+        # First try XML format with <Key> tags, if that fails try extracting from "name": "filename" format
+        cmd = f'curl -s "{s3_bucket_url}" | {{ grep -oP "(?<=<Key>)[^<]*{search_pattern}[^<]*\\.tar\\.gz(?=</Key>)" || grep -oP \'(?<="name": ")[^"]*{search_pattern}[^"]*\\.tar\\.gz(?=")\'; }} | grep -v "ADHOCBUILD" | awk -F"[.tar.gz]" "{{match(\\$0, /[0-9]{{8}}/); print substr(\\$0, RSTART, 8), \\$0}}" | sort -k1 -n | tail -1 | cut -d" " -f2'
 
     result = run_command_with_logging(cmd)
 
@@ -319,7 +321,7 @@ def get_latest_s3_tarball(s3_bucket_url: str, gpu_arch_pattern: str) -> str:
     latest_filename = result.stdout.strip()
 
     if not latest_filename:
-        print(f"ERROR: No tar.gz file found matching pattern '{gpu_arch_pattern}'")
+        print(f"ERROR: No tar.gz file found matching pattern '{search_pattern}'")
         return ""
 
     # Construct the full URL
