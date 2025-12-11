@@ -67,10 +67,13 @@ env:
   JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
 
 jobs:
-  trigger-orchestrai:
-    name: Trigger OrchestrAI (${{ inputs.platform }})
+  # Preprocessing job to generate the matrix of GPU targets
+  preprocess:
+    name: Generate GPU Matrix
     runs-on: arc-lnx-pub
-    environment: ucicd
+    outputs:
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
+      trigger_count: ${{ steps.generate_matrix.outputs.trigger_count }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -80,10 +83,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate OrchestrAI trigger parameters
-        id: generate_params
+      - name: Generate trigger configurations
+        id: generate_matrix
         run: |
-          echo "Generating OrchestrAI trigger parameters for ${{ inputs.platform }}..."
+          echo "Generating OrchestrAI trigger configurations for ${{ inputs.platform }}..."
 
           # Build the command with optional parameters
           CMD="python build_tools/trigger_orchestrai.py --mode generate --platform ${{ inputs.platform }} --commit-id ${{ github.sha }}"
@@ -104,8 +107,25 @@ jobs:
           echo "Running: $CMD"
           eval $CMD
 
-          echo "✅ Parameters generated successfully"
+          # Read the trigger configs and transform to matrix format
+          TRIGGER_CONFIGS=$(grep -oP 'trigger_configs=\K.*' $GITHUB_OUTPUT || echo "[]")
 
+          # Create matrix JSON with include array
+          MATRIX=$(echo "$TRIGGER_CONFIGS" | jq -c '{include: .}')
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+          echo "✅ Matrix generated with $(echo "$TRIGGER_CONFIGS" | jq 'length') configurations"
+
+  # Matrix job that triggers each GPU target in parallel
+  trigger-orchestrai:
+    name: Trigger OrchestrAI (${{ matrix.gpu_tag }})
+    needs: preprocess
+    runs-on: arc-lnx-pub
+    environment: ucicd
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.preprocess.outputs.matrix) }}
+    steps:
       - name: Trigger OrchestrAI
         id: trigger
         env:
@@ -113,16 +133,13 @@ jobs:
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
           JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_USER }}
         run: |
-          echo "Triggering OrchestrAI for platform: ${{ inputs.platform }}"
+          echo "Triggering OrchestrAI for GPU: ${{ matrix.gpu_tag }} on ${{ matrix.platform }}"
 
-          # Get the first trigger config (for now, we trigger one job at a time)
-          TRIGGER_CONFIGS='${{ steps.generate_params.outputs.trigger_configs }}'
-          BUILDS_JSON=$(echo "$TRIGGER_CONFIGS" | jq -r '.[0].builds_json')
-
+          BUILDS_JSON='${{ matrix.builds_json }}'
           echo "BUILDS_JSON: ${BUILDS_JSON}"
 
           # Extract SDK URL for later use in summary
-          SDK_URL=$(echo "$BUILDS_JSON" | jq -r '.use_case.the_rock.therock_sdk_url // "N/A"')
+          SDK_URL='${{ matrix.sdk_url }}'
           echo "sdk_url=${SDK_URL}" >> $GITHUB_OUTPUT
 
           # URL-encode the parameters using jq
@@ -138,7 +155,7 @@ jobs:
           QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
 
           if [ -z "$QUEUE_URL" ]; then
-            echo "::error::Failed to trigger OrchestrAI"
+            echo "::error::Failed to trigger OrchestrAI for ${{ matrix.gpu_tag }}"
             echo "Response:"
             echo "$RESPONSE" | head -30
             exit 1
@@ -155,7 +172,7 @@ jobs:
         run: |
           QUEUE_URL="${{ steps.trigger.outputs.queue_url }}"
 
-          echo "Waiting for OrchestrAI build to be assigned..."
+          echo "Waiting for OrchestrAI build (${{ matrix.gpu_tag }}) to be assigned..."
 
           # Poll the queue until we get a build number (max 5 minutes)
           MAX_ATTEMPTS=60
@@ -178,7 +195,7 @@ jobs:
             CANCELLED=$(echo "$QUEUE_INFO" | jq -r '.cancelled // false')
 
             if [ "$CANCELLED" = "true" ]; then
-              echo "::error::OrchestrAI build was cancelled in queue"
+              echo "::error::OrchestrAI build (${{ matrix.gpu_tag }}) was cancelled in queue"
               exit 1
             fi
 
@@ -188,7 +205,7 @@ jobs:
           done
 
           if [ -z "$BUILD_NUMBER" ]; then
-            echo "::error::Timed out waiting for OrchestrAI build number"
+            echo "::error::Timed out waiting for OrchestrAI build number (${{ matrix.gpu_tag }})"
             exit 1
           fi
 
@@ -202,7 +219,7 @@ jobs:
           BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
           BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-          echo "Polling OrchestrAI build: ${BUILD_NUMBER}"
+          echo "Polling OrchestrAI build: ${BUILD_NUMBER} (${{ matrix.gpu_tag }})"
 
           POLLING_INTERVAL=${{ inputs.polling_interval }}
           TIMEOUT_SECONDS=$(( ${{ inputs.timeout_minutes }} * 60 ))
@@ -213,7 +230,7 @@ jobs:
             ELAPSED=$((CURRENT_TIME - START_TIME))
 
             if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
-              echo "::error::Timeout waiting for OrchestrAI to complete"
+              echo "::error::Timeout waiting for OrchestrAI (${{ matrix.gpu_tag }}) to complete"
               exit 1
             fi
 
@@ -238,7 +255,7 @@ jobs:
               break
             fi
 
-            echo "Build still running... (elapsed: ${ELAPSED}s)"
+            echo "Build still running (${{ matrix.gpu_tag }})... (elapsed: ${ELAPSED}s)"
             sleep $POLLING_INTERVAL
           done
 
@@ -289,9 +306,11 @@ jobs:
         run: |
           RESULT="${{ steps.poll.outputs.result }}"
           SDK_URL="${{ steps.trigger.outputs.sdk_url }}"
+          GPU_TAG="${{ matrix.gpu_tag }}"
+          PLATFORM="${{ matrix.platform }}"
 
-          # Write summary in the same format as the GitHub PR comment from Jenkins
-          echo "### OrchestrAI Test Results" >> $GITHUB_STEP_SUMMARY
+          # Write summary with GPU target context
+          echo "### OrchestrAI Test Results - ${GPU_TAG} (${PLATFORM})" >> $GITHUB_STEP_SUMMARY
 
           # Add test results table if available
           if [ "${{ steps.test_results.outputs.has_results }}" = "true" ]; then
@@ -309,6 +328,6 @@ jobs:
 
           # Fail the workflow if OrchestrAI job failed
           if [ "$RESULT" != "SUCCESS" ]; then
-            echo "::error::OrchestrAI finished with result: ${RESULT}"
+            echo "::error::OrchestrAI (${GPU_TAG}) finished with result: ${RESULT}"
             exit 1
           fi
