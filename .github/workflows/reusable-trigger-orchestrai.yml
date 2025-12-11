@@ -27,6 +27,11 @@ on:
         required: false
         type: number
         default: 240 # 4 hour timeout
+      skip_individual_summaries:
+        description: 'Skip writing individual job summaries (only write consolidated summary)'
+        required: false
+        type: boolean
+        default: false
     secrets:
       UCICD_USER:
         required: true
@@ -61,6 +66,11 @@ on:
         required: false
         type: number
         default: 240 # 4 hour timeout
+      skip_individual_summaries:
+        description: 'Skip writing individual job summaries (only write consolidated summary)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
@@ -125,6 +135,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.preprocess.outputs.matrix) }}
+    outputs:
+      # Note: Matrix jobs can't directly output arrays, so we upload results as artifacts
+      result: ${{ steps.poll.outputs.result }}
     steps:
       - name: Trigger OrchestrAI
         id: trigger
@@ -302,7 +315,41 @@ jobs:
             echo "has_results=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Save Results for Consolidated Summary
+        id: save_results
+        run: |
+          # Create a JSON file with this job's results for the consolidated summary
+          mkdir -p results
+          cat > results/${{ matrix.gpu_tag }}.json << 'EOF'
+          {
+            "gpu_tag": "${{ matrix.gpu_tag }}",
+            "platform": "${{ matrix.platform }}",
+            "sdk_url": "${{ steps.trigger.outputs.sdk_url }}",
+            "build_number": "${{ steps.get_build_number.outputs.build_number }}",
+            "result": "${{ steps.poll.outputs.result }}",
+            "duration": "${{ steps.poll.outputs.duration }}",
+            "has_results": "${{ steps.test_results.outputs.has_results }}",
+            "test_platform": "${{ steps.test_results.outputs.platform }}",
+            "test_gpu_arch": "${{ steps.test_results.outputs.gpu_arch }}",
+            "total_tests": "${{ steps.test_results.outputs.total_tests }}",
+            "passed": "${{ steps.test_results.outputs.passed }}",
+            "failed": "${{ steps.test_results.outputs.failed }}",
+            "skipped": "${{ steps.test_results.outputs.skipped }}",
+            "error": "${{ steps.test_results.outputs.error }}",
+            "unknown": "${{ steps.test_results.outputs.unknown }}"
+          }
+          EOF
+          echo "Saved results for ${{ matrix.gpu_tag }}"
+
+      - name: Upload Results Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: orchestrai-results-${{ matrix.gpu_tag }}
+          path: results/${{ matrix.gpu_tag }}.json
+          retention-days: 1
+
       - name: Write Job Summary
+        if: ${{ inputs.skip_individual_summaries != true }}
         run: |
           RESULT="${{ steps.poll.outputs.result }}"
           SDK_URL="${{ steps.trigger.outputs.sdk_url }}"
@@ -326,8 +373,99 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**SDK URL:** ${SDK_URL}" >> $GITHUB_STEP_SUMMARY
 
+      - name: Check Result
+        run: |
+          RESULT="${{ steps.poll.outputs.result }}"
+          GPU_TAG="${{ matrix.gpu_tag }}"
+
           # Fail the workflow if OrchestrAI job failed
           if [ "$RESULT" != "SUCCESS" ]; then
             echo "::error::OrchestrAI (${GPU_TAG}) finished with result: ${RESULT}"
             exit 1
           fi
+
+  # Consolidated summary job that combines all matrix results
+  consolidated-summary:
+    name: Consolidated Summary
+    needs: [preprocess, trigger-orchestrai]
+    if: always()
+    runs-on: arc-lnx-pub
+    steps:
+      - name: Download All Results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: orchestrai-results-*
+          path: results
+          merge-multiple: true
+
+      - name: Generate Consolidated Summary
+        run: |
+          echo "### OrchestrAI Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if we have any results
+          if [ ! -d results ] || [ -z "$(ls -A results 2>/dev/null)" ]; then
+            echo "_No test results available_" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Create the table header
+          echo "| GPU Target | Platform | Result | Total Tests | Passed | Failed | Skipped | Error | Unknown |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|----------|--------|-------------|--------|--------|---------|-------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          # Track overall status
+          ANY_FAILED=false
+          SDK_URLS=""
+
+          # Process each result file
+          for result_file in results/*.json; do
+            if [ -f "$result_file" ]; then
+              GPU_TAG=$(jq -r '.gpu_tag // "N/A"' "$result_file")
+              PLATFORM=$(jq -r '.platform // "N/A"' "$result_file")
+              RESULT=$(jq -r '.result // "UNKNOWN"' "$result_file")
+              SDK_URL=$(jq -r '.sdk_url // "N/A"' "$result_file")
+              HAS_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
+
+              # Format result with emoji
+              if [ "$RESULT" = "SUCCESS" ]; then
+                RESULT_DISPLAY="✅ SUCCESS"
+              elif [ "$RESULT" = "FAILURE" ]; then
+                RESULT_DISPLAY="❌ FAILURE"
+                ANY_FAILED=true
+              else
+                RESULT_DISPLAY="⚠️ ${RESULT}"
+              fi
+
+              if [ "$HAS_RESULTS" = "true" ]; then
+                TOTAL=$(jq -r '.total_tests // "N/A"' "$result_file")
+                PASSED=$(jq -r '.passed // "N/A"' "$result_file")
+                FAILED=$(jq -r '.failed // "N/A"' "$result_file")
+                SKIPPED=$(jq -r '.skipped // "N/A"' "$result_file")
+                ERROR=$(jq -r '.error // "N/A"' "$result_file")
+                UNKNOWN=$(jq -r '.unknown // "N/A"' "$result_file")
+              else
+                TOTAL="-"
+                PASSED="-"
+                FAILED="-"
+                SKIPPED="-"
+                ERROR="-"
+                UNKNOWN="-"
+              fi
+
+              echo "| ${GPU_TAG} | ${PLATFORM} | ${RESULT_DISPLAY} | ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${ERROR} | ${UNKNOWN} |" >> $GITHUB_STEP_SUMMARY
+
+              # Collect unique SDK URLs
+              if [ "$SDK_URL" != "N/A" ] && [[ ! "$SDK_URLS" =~ "$SDK_URL" ]]; then
+                SDK_URLS="${SDK_URLS}${SDK_URL}\n"
+              fi
+            fi
+          done
+
+          # Add SDK URLs section
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
+          echo -e "$SDK_URLS" | while read -r url; do
+            if [ -n "$url" ]; then
+              echo "- ${url}" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
