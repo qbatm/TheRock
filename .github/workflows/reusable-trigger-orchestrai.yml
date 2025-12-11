@@ -21,12 +21,12 @@ on:
         description: 'Polling interval in seconds'
         required: false
         type: number
-        default: 30
+        default: 300 # Every 5 minutes
       timeout_minutes:
         description: 'Timeout in minutes'
         required: false
         type: number
-        default: 60
+        default: 240 # 4 hour timeout
     secrets:
       UCICD_USER:
         required: true
@@ -121,6 +121,10 @@ jobs:
 
           echo "BUILDS_JSON: ${BUILDS_JSON}"
 
+          # Extract SDK URL for later use in summary
+          SDK_URL=$(echo "$BUILDS_JSON" | jq -r '.use_case.the_rock.therock_sdk_url // "N/A"')
+          echo "sdk_url=${SDK_URL}" >> $GITHUB_OUTPUT
+
           # URL-encode the parameters using jq
           ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
 
@@ -142,11 +146,6 @@ jobs:
 
           echo "Queue URL: $QUEUE_URL"
           echo "queue_url=${QUEUE_URL}" >> $GITHUB_OUTPUT
-
-          echo "### OrchestrAI Triggered 🚀" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Platform:** ${{ inputs.platform }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Build Number
         id: get_build_number
@@ -194,9 +193,6 @@ jobs:
           fi
 
           echo "build_number=${BUILD_NUMBER}" >> $GITHUB_OUTPUT
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Number:** ${BUILD_NUMBER}" >> $GITHUB_STEP_SUMMARY
 
       - name: Poll OrchestrAI for Completion
         id: poll
@@ -290,49 +286,26 @@ jobs:
           fi
 
       - name: Write Job Summary
-        env:
-          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
           RESULT="${{ steps.poll.outputs.result }}"
-          DURATION="${{ steps.poll.outputs.duration }}"
+          SDK_URL="${{ steps.trigger.outputs.sdk_url }}"
 
-          # Determine status emoji
-          case "$RESULT" in
-            SUCCESS)
-              STATUS_EMOJI="✅"
-              ;;
-            FAILURE)
-              STATUS_EMOJI="❌"
-              ;;
-            UNSTABLE)
-              STATUS_EMOJI="⚠️"
-              ;;
-            ABORTED)
-              STATUS_EMOJI="🛑"
-              ;;
-            *)
-              STATUS_EMOJI="❓"
-              ;;
-          esac
-
-          echo "## OrchestrAI Results ${STATUS_EMOJI}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Platform** | ${{ inputs.platform }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build Number** | ${BUILD_NUMBER} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Result** | ${RESULT} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Duration** | ${DURATION} |" >> $GITHUB_STEP_SUMMARY
+          # Write summary in the same format as the GitHub PR comment from Jenkins
+          echo "### OrchestrAI Test Results" >> $GITHUB_STEP_SUMMARY
 
           # Add test results table if available
           if [ "${{ steps.test_results.outputs.has_results }}" = "true" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Test Results" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Platform | GPU Arch | Total Tests | Passed | Failed | Skipped | Error | Unknown |" >> $GITHUB_STEP_SUMMARY
             echo "|----------|----------|-------------|--------|--------|---------|-------|---------|" >> $GITHUB_STEP_SUMMARY
             echo "| ${{ steps.test_results.outputs.platform }} | ${{ steps.test_results.outputs.gpu_arch }} | ${{ steps.test_results.outputs.total_tests }} | ${{ steps.test_results.outputs.passed }} | ${{ steps.test_results.outputs.failed }} | ${{ steps.test_results.outputs.skipped }} | ${{ steps.test_results.outputs.error }} | ${{ steps.test_results.outputs.unknown }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Test results not available_" >> $GITHUB_STEP_SUMMARY
           fi
+
+          # Add SDK URL link
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**SDK URL:** ${SDK_URL}" >> $GITHUB_STEP_SUMMARY
 
           # Fail the workflow if OrchestrAI job failed
           if [ "$RESULT" != "SUCCESS" ]; then
