@@ -96,7 +96,7 @@ jobs:
       - setup
       - mock_windows_build_and_test
       - mock_general_failure
-    uses: ./.github/workflows/reusable-trigger-jenkins.yml
+    uses: ./.github/workflows/reusable-trigger-orchestrai.yml
     with:
       platform: windows
       sdk_url_override: ${{ inputs.sdk_url_override }}
