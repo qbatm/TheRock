@@ -86,7 +86,7 @@ jobs:
           echo "Generating OrchestrAI trigger parameters for ${{ inputs.platform }}..."
 
           # Build the command with optional parameters
-          CMD="python build_tools/trigger_jenkins.py --mode generate --platform ${{ inputs.platform }} --commit-id ${{ github.sha }}"
+          CMD="python build_tools/trigger_orchestrai.py --mode generate --platform ${{ inputs.platform }} --commit-id ${{ github.sha }}"
 
           # Add SDK URL override if provided
           if [[ -n "${{ inputs.sdk_url_override }}" ]]; then

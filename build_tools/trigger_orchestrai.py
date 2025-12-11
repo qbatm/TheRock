@@ -31,11 +31,18 @@ except ImportError:
 # This maps TheRock build architecture patterns to Jenkins agent GPU patterns
 GPU_MAPPING = {
     "gfx120X-all": [
-        "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
+        "gpu_navi4x",
+        # "gpu_navi48xt",       # AMD Radeon RX 9070 - gfx1201
         # "gpu_navi48xtx",    # AMD Radeon RX 9070 XT - gfx1201
         # "gpu_navi44xl",     # AMD Radeon RX 9060 - gfx1200
         # "gpu_navi44xt"      # AMD Radeon RX 9060 XT - gfx1200
     ],
+    "gfx110X-all": [
+        "gpu_navi3x",
+    ],
+    "gfx1151": [
+        "igpu_stxh",
+    ]
     # Uncomment and expand as needed:
     # "gfx110X-dgpu": [
     #     "gpu_navi31xtx",    # AMD Radeon RX 7900 XTX - gfx1100
