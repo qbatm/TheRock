@@ -64,8 +64,8 @@ on:
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  # JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
-  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test"
+  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
+  # JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test"
 
 jobs:
   trigger-orchestrai:
