@@ -55,12 +55,12 @@ on:
         description: 'Polling interval in seconds'
         required: false
         type: number
-        default: 30
+        default: 300 # Every 5 minutes
       timeout_minutes:
         description: 'Timeout in minutes'
         required: false
         type: number
-        default: 60
+        default: 240 # 4 hour timeout
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
@@ -247,6 +247,49 @@ jobs:
             sleep $POLLING_INTERVAL
           done
 
+      - name: Fetch Test Results
+        id: test_results
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          echo "Fetching test results from OrchestrAI build ${BUILD_NUMBER}..."
+
+          # Try to fetch the test results JSON artifact from Jenkins workspace
+          # The file is written as ucicd_test_results.json by the pipeline
+          TEST_RESULTS=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+            "${BUILD_URL}/artifact/ucicd_test_results.json" 2>/dev/null || echo "")
+
+          if [ -n "$TEST_RESULTS" ] && echo "$TEST_RESULTS" | jq -e '.summary' > /dev/null 2>&1; then
+            echo "✅ Test results fetched successfully"
+
+            # Extract test summary fields
+            PLATFORM=$(echo "$TEST_RESULTS" | jq -r '.summary.environment.THEROCK_PLATFORM // "N/A"')
+            GPU_ARCH=$(echo "$TEST_RESULTS" | jq -r '.summary.environment.THEROCK_GPU_ARCH_PATTERN // "N/A"')
+            TOTAL_TESTS=$(echo "$TEST_RESULTS" | jq -r '.summary.total_tests // "N/A"')
+            PASSED=$(echo "$TEST_RESULTS" | jq -r '.summary.passed // "N/A"')
+            FAILED=$(echo "$TEST_RESULTS" | jq -r '.summary.failed // "N/A"')
+            SKIPPED=$(echo "$TEST_RESULTS" | jq -r '.summary.skipped // "N/A"')
+            ERROR=$(echo "$TEST_RESULTS" | jq -r '.summary.error // "N/A"')
+            UNKNOWN=$(echo "$TEST_RESULTS" | jq -r '.summary.unknown // "N/A"')
+
+            # Output for use in summary step
+            echo "has_results=true" >> $GITHUB_OUTPUT
+            echo "platform=${PLATFORM}" >> $GITHUB_OUTPUT
+            echo "gpu_arch=${GPU_ARCH}" >> $GITHUB_OUTPUT
+            echo "total_tests=${TOTAL_TESTS}" >> $GITHUB_OUTPUT
+            echo "passed=${PASSED}" >> $GITHUB_OUTPUT
+            echo "failed=${FAILED}" >> $GITHUB_OUTPUT
+            echo "skipped=${SKIPPED}" >> $GITHUB_OUTPUT
+            echo "error=${ERROR}" >> $GITHUB_OUTPUT
+            echo "unknown=${UNKNOWN}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Test results not available or invalid format"
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Write Job Summary
         env:
           BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
@@ -281,6 +324,16 @@ jobs:
           echo "| **Build Number** | ${BUILD_NUMBER} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Result** | ${RESULT} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Duration** | ${DURATION} |" >> $GITHUB_STEP_SUMMARY
+
+          # Add test results table if available
+          if [ "${{ steps.test_results.outputs.has_results }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Platform | GPU Arch | Total Tests | Passed | Failed | Skipped | Error | Unknown |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|----------|-------------|--------|--------|---------|-------|---------|" >> $GITHUB_STEP_SUMMARY
+            echo "| ${{ steps.test_results.outputs.platform }} | ${{ steps.test_results.outputs.gpu_arch }} | ${{ steps.test_results.outputs.total_tests }} | ${{ steps.test_results.outputs.passed }} | ${{ steps.test_results.outputs.failed }} | ${{ steps.test_results.outputs.skipped }} | ${{ steps.test_results.outputs.error }} | ${{ steps.test_results.outputs.unknown }} |" >> $GITHUB_STEP_SUMMARY
+          fi
 
           # Fail the workflow if OrchestrAI job failed
           if [ "$RESULT" != "SUCCESS" ]; then
