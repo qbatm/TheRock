@@ -1,4 +1,4 @@
-name: Reusable Jenkins Trigger
+name: Reusable OrchestrAI Trigger
 
 on:
   workflow_call:
@@ -32,14 +32,44 @@ on:
         required: true
       UCICD_TOKEN:
         required: true
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to trigger (linux or windows)'
+        required: true
+        type: choice
+        options:
+          - linux
+          - windows
+      sdk_url_override:
+        description: 'Override SDK URL (skips S3 lookup)'
+        required: false
+        type: string
+        default: ''
+      pool_type:
+        description: 'Jenkins agent pool type'
+        required: false
+        type: string
+        default: 'ucicd_production_hot_machines'
+      polling_interval:
+        description: 'Polling interval in seconds'
+        required: false
+        type: number
+        default: 30
+      timeout_minutes:
+        description: 'Timeout in minutes'
+        required: false
+        type: number
+        default: 60
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
+  # JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
+  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test"
 
 jobs:
-  trigger-jenkins:
-    name: Trigger Jenkins Job (${{ inputs.platform }})
+  trigger-orchestrai:
+    name: Trigger OrchestrAI (${{ inputs.platform }})
     runs-on: arc-lnx-pub
     environment: ucicd
     steps:
@@ -51,10 +81,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate Jenkins trigger parameters
+      - name: Generate OrchestrAI trigger parameters
         id: generate_params
         run: |
-          echo "Generating Jenkins trigger parameters for ${{ inputs.platform }}..."
+          echo "Generating OrchestrAI trigger parameters for ${{ inputs.platform }}..."
 
           # Build the command with optional parameters
           CMD="python build_tools/trigger_jenkins.py --mode generate --platform ${{ inputs.platform }} --commit-id ${{ github.sha }}"
@@ -77,14 +107,14 @@ jobs:
 
           echo "✅ Parameters generated successfully"
 
-      - name: Trigger Jenkins Job
+      - name: Trigger OrchestrAI
         id: trigger
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
           JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_USER }}
         run: |
-          echo "Triggering Jenkins job: ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}"
+          echo "Triggering OrchestrAI for platform: ${{ inputs.platform }}"
 
           # Get the first trigger config (for now, we trigger one job at a time)
           TRIGGER_CONFIGS='${{ steps.generate_params.outputs.trigger_configs }}'
@@ -105,7 +135,7 @@ jobs:
           QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
 
           if [ -z "$QUEUE_URL" ]; then
-            echo "::error::Failed to get queue URL from Jenkins response"
+            echo "::error::Failed to trigger OrchestrAI"
             echo "Response:"
             echo "$RESPONSE" | head -30
             exit 1
@@ -114,13 +144,9 @@ jobs:
           echo "Queue URL: $QUEUE_URL"
           echo "queue_url=${QUEUE_URL}" >> $GITHUB_OUTPUT
 
-          echo "### Jenkins Job Triggered 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "### OrchestrAI Triggered 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Platform:** ${{ inputs.platform }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Jenkins URL:** ${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Queue URL:** ${QUEUE_URL}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Parameters:**" >> $GITHUB_STEP_SUMMARY
-          echo "  - BUILDS_JSON: \`${BUILDS_JSON}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Build Number
@@ -131,7 +157,7 @@ jobs:
         run: |
           QUEUE_URL="${{ steps.trigger.outputs.queue_url }}"
 
-          echo "Waiting for build to be assigned a build number..."
+          echo "Waiting for OrchestrAI build to be assigned..."
 
           # Poll the queue until we get a build number (max 5 minutes)
           MAX_ATTEMPTS=60
@@ -154,7 +180,7 @@ jobs:
             CANCELLED=$(echo "$QUEUE_INFO" | jq -r '.cancelled // false')
 
             if [ "$CANCELLED" = "true" ]; then
-              echo "::error::Jenkins build was cancelled in queue"
+              echo "::error::OrchestrAI build was cancelled in queue"
               exit 1
             fi
 
@@ -164,19 +190,16 @@ jobs:
           done
 
           if [ -z "$BUILD_NUMBER" ]; then
-            echo "::error::Timed out waiting for build number"
+            echo "::error::Timed out waiting for OrchestrAI build number"
             exit 1
           fi
-
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
 
           echo "build_number=${BUILD_NUMBER}" >> $GITHUB_OUTPUT
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Number:** ${BUILD_NUMBER}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build URL:** [View in Jenkins](${BUILD_URL})" >> $GITHUB_STEP_SUMMARY
 
-      - name: Poll Jenkins for Completion
+      - name: Poll OrchestrAI for Completion
         id: poll
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
@@ -184,7 +207,7 @@ jobs:
           BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
           BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-          echo "Polling Jenkins build: ${BUILD_URL}"
+          echo "Polling OrchestrAI build: ${BUILD_NUMBER}"
 
           POLLING_INTERVAL=${{ inputs.polling_interval }}
           TIMEOUT_SECONDS=$(( ${{ inputs.timeout_minutes }} * 60 ))
@@ -195,7 +218,7 @@ jobs:
             ELAPSED=$((CURRENT_TIME - START_TIME))
 
             if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
-              echo "::error::Timeout waiting for Jenkins job to complete"
+              echo "::error::Timeout waiting for OrchestrAI to complete"
               exit 1
             fi
 
@@ -206,7 +229,7 @@ jobs:
             BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
 
             if [ "$BUILDING" = "false" ]; then
-              echo "Jenkins build completed!"
+              echo "OrchestrAI build completed!"
 
               # Extract result using jq
               RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
@@ -224,27 +247,10 @@ jobs:
             sleep $POLLING_INTERVAL
           done
 
-      - name: Fetch Jenkins Console Output
-        id: console
-        env:
-          UCICD_USER: ${{ secrets.UCICD_USER }}
-          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
-        run: |
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
-          echo "Fetching console output from Jenkins..."
-
-          # Get console output (last 100 lines to keep it manageable)
-          curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
-            "${BUILD_URL}/consoleText" | tail -100 > jenkins_console.txt
-
-          echo "Console output saved"
-
       - name: Write Job Summary
         env:
           BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
         run: |
-          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
           RESULT="${{ steps.poll.outputs.result }}"
           DURATION="${{ steps.poll.outputs.duration }}"
 
@@ -267,7 +273,7 @@ jobs:
               ;;
           esac
 
-          echo "## Jenkins Job Results ${STATUS_EMOJI}" >> $GITHUB_STEP_SUMMARY
+          echo "## OrchestrAI Results ${STATUS_EMOJI}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -275,16 +281,9 @@ jobs:
           echo "| **Build Number** | ${BUILD_NUMBER} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Result** | ${RESULT} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Duration** | ${DURATION} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Build URL** | [View in Jenkins](${BUILD_URL}) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Console Output (last 100 lines)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat jenkins_console.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
 
-          # Fail the workflow if Jenkins job failed
+          # Fail the workflow if OrchestrAI job failed
           if [ "$RESULT" != "SUCCESS" ]; then
-            echo "::error::Jenkins job finished with result: ${RESULT}"
+            echo "::error::OrchestrAI finished with result: ${RESULT}"
             exit 1
           fi

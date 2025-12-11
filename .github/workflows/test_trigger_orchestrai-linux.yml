@@ -89,8 +89,8 @@ jobs:
           echo "❌ Simulating a general pipeline failure"
           exit 1
 
-  trigger-jenkins:
-    name: Trigger Jenkins
+  trigger-orchestrai:
+    name: Trigger OrchestrAI
     if: always()
     needs:
       - setup
