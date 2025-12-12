@@ -45,7 +45,7 @@ env:
   CI_WORKFLOW: "ci.yml"
   CI_NIGHTLY_WORKFLOW: "ci_nightly.yml"
   # Lookback period in hours (default 1 hour)
-  DEFAULT_LOOKBACK_HOURS: 1
+  DEFAULT_LOOKBACK_HOURS: 8
 
 jobs:
   # Job to discover new runs from TheRock repo
