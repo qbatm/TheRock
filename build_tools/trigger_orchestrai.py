@@ -175,13 +175,12 @@ def build_builds_json(
                 "gpu_arch_pattern": gpu_arch_pattern,
                 "therock_sdk_url": therock_sdk_url or "",
                 "pool_type": pool_type,
-                "gh_commit_id": commit_id
+                "gh_commit_id": commit_id,
+                "run_id": run_id or ""
             }
         }
     }
-    # Add run_id if provided (for bump PRs that need install_rocm_from_artifacts.py)
-    if run_id:
-        payload["use_case"]["the_rock"]["run_id"] = run_id
+    # Add amdgpu_family if provided
     if amdgpu_family:
         payload["use_case"]["the_rock"]["amdgpu_family"] = amdgpu_family
     return json.dumps(payload)
