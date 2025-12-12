@@ -30,6 +30,11 @@ on:
         required: false
         type: string
         default: ''
+      head_sha:
+        description: 'Git commit SHA from TheRock'
+        required: false
+        type: string
+        default: ''
       platform:
         description: 'Platform to trigger (linux or windows)'
         required: false
@@ -46,6 +51,7 @@ jobs:
     with:
       platform: ${{ inputs.platform }}
       run_id: ${{ inputs.run_id }}
+      head_sha: ${{ inputs.head_sha }}
     secrets:
       UCICD_USER: ${{ secrets.UCICD_USER }}
       UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
