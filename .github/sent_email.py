@@ -95,9 +95,9 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
                         # "Navi33 GLXT",      # AMD Radeon PRO W7600 - gfx1102
                         # "Navi33 GLXL"       # AMD Radeon PRO W7500 - gfx1102
         ],
-                        # "gfx1150-all": [
-                        #     "igpu_stx",
-                        # ],
+        "gfx1150-all": [
+            "igpu_stx",
+        ],
         "gfx1151": [
             "igpu_stxh",
         ],
@@ -107,7 +107,8 @@ def send_pipeline_notification(receiver_email, status, workflow_url=None, failed
                         # "gpu_navi48xl",       # AMD Radeon RX 9070 GRE - gfx1201
                         # "gpu_navi48xtw",      # AMD Radeon AI PRO R9700 - gfx1201
             "gpu_navi44xl",       # AMD Radeon RX 9060 - gfx1200
-            "gpu_navi44xt"        # AMD Radeon RX 9060 XT - gfx1200
+            "gpu_navi44xt",        # AMD Radeon RX 9060 XT - gfx1200
+            "mgpu_navi48xtw" # multi gpu setup
         ],
                     # "gfx115X-all": [
                     #     "Radeon 8060S Graphics",  # AMD Ryzen AI Max+ 395 - gfx1151 Strix Halo
