@@ -8,7 +8,12 @@ on:
         required: true
         type: string
       sdk_url_override:
-        description: 'Override SDK URL (skips S3 lookup)'
+        description: 'Override SDK URL (skips S3 lookup, for nightly builds)'
+        required: false
+        type: string
+        default: ''
+      run_id:
+        description: 'GitHub Actions workflow run ID (for bump PRs, uses install_rocm_from_artifacts.py)'
         required: false
         type: string
         default: ''
@@ -47,7 +52,12 @@ on:
           - linux
           - windows
       sdk_url_override:
-        description: 'Override SDK URL (skips S3 lookup)'
+        description: 'Override SDK URL (skips S3 lookup, for nightly builds)'
+        required: false
+        type: string
+        default: ''
+      run_id:
+        description: 'GitHub Actions workflow run ID (for bump PRs, uses install_rocm_from_artifacts.py)'
         required: false
         type: string
         default: ''
@@ -101,9 +111,14 @@ jobs:
           # Build the command with optional parameters
           CMD="python build_tools/trigger_orchestrai.py --mode generate --platform ${{ inputs.platform }} --commit-id ${{ github.sha }}"
 
-          # Add SDK URL override if provided
+          # Add SDK URL override if provided (for nightly builds)
           if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
             CMD="$CMD --sdk-url \"${{ inputs.sdk_url_override }}\""
+          fi
+
+          # Add run_id if provided (for bump PRs)
+          if [[ -n "${{ inputs.run_id }}" ]]; then
+            CMD="$CMD --run-id \"${{ inputs.run_id }}\""
           fi
 
           # Add pool type if provided
@@ -151,9 +166,11 @@ jobs:
           BUILDS_JSON='${{ matrix.builds_json }}'
           echo "BUILDS_JSON: ${BUILDS_JSON}"
 
-          # Extract SDK URL for later use in summary
+          # Extract SDK URL and run_id for later use in summary
           SDK_URL='${{ matrix.sdk_url }}'
+          RUN_ID='${{ matrix.run_id }}'
           echo "sdk_url=${SDK_URL}" >> $GITHUB_OUTPUT
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
 
           # URL-encode the parameters using jq
           ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
@@ -325,6 +342,7 @@ jobs:
             "gpu_tag": "${{ matrix.gpu_tag }}",
             "platform": "${{ matrix.platform }}",
             "sdk_url": "${{ steps.trigger.outputs.sdk_url }}",
+            "run_id": "${{ steps.trigger.outputs.run_id }}",
             "build_number": "${{ steps.get_build_number.outputs.build_number }}",
             "result": "${{ steps.poll.outputs.result }}",
             "duration": "${{ steps.poll.outputs.duration }}",
@@ -353,6 +371,7 @@ jobs:
         run: |
           RESULT="${{ steps.poll.outputs.result }}"
           SDK_URL="${{ steps.trigger.outputs.sdk_url }}"
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
           GPU_TAG="${{ matrix.gpu_tag }}"
           PLATFORM="${{ matrix.platform }}"
 
@@ -369,9 +388,14 @@ jobs:
             echo "_Test results not available_" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Add SDK URL link
+          # Add source info (SDK URL or Run ID)
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**SDK URL:** ${SDK_URL}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$RUN_ID" ]; then
+            echo "**TheRock Run ID:** [${RUN_ID}](https://github.com/ROCm/TheRock/actions/runs/${RUN_ID})" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "$SDK_URL" ]; then
+            echo "**SDK URL:** ${SDK_URL}" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Check Result
         run: |
@@ -416,6 +440,7 @@ jobs:
           # Track overall status
           ANY_FAILED=false
           SDK_URLS=""
+          RUN_IDS=""
 
           # Process each result file
           for result_file in results/*.json; do
@@ -423,7 +448,8 @@ jobs:
               GPU_TAG=$(jq -r '.gpu_tag // "N/A"' "$result_file")
               PLATFORM=$(jq -r '.platform // "N/A"' "$result_file")
               RESULT=$(jq -r '.result // "UNKNOWN"' "$result_file")
-              SDK_URL=$(jq -r '.sdk_url // "N/A"' "$result_file")
+              SDK_URL=$(jq -r '.sdk_url // ""' "$result_file")
+              RUN_ID=$(jq -r '.run_id // ""' "$result_file")
               HAS_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
 
               # Format result with emoji
@@ -455,17 +481,35 @@ jobs:
               echo "| ${GPU_TAG} | ${PLATFORM} | ${RESULT_DISPLAY} | ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${ERROR} | ${UNKNOWN} |" >> $GITHUB_STEP_SUMMARY
 
               # Collect unique SDK URLs
-              if [ "$SDK_URL" != "N/A" ] && [[ ! "$SDK_URLS" =~ "$SDK_URL" ]]; then
+              if [ -n "$SDK_URL" ] && [[ ! "$SDK_URLS" =~ "$SDK_URL" ]]; then
                 SDK_URLS="${SDK_URLS}${SDK_URL}\n"
+              fi
+
+              # Collect unique Run IDs
+              if [ -n "$RUN_ID" ] && [[ ! "$RUN_IDS" =~ "$RUN_ID" ]]; then
+                RUN_IDS="${RUN_IDS}${RUN_ID}\n"
               fi
             fi
           done
 
-          # Add SDK URLs section
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
-          echo -e "$SDK_URLS" | while read -r url; do
-            if [ -n "$url" ]; then
-              echo "- ${url}" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+          # Add TheRock Run IDs section (for bump PRs)
+          if [ -n "$RUN_IDS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**TheRock Run IDs:**" >> $GITHUB_STEP_SUMMARY
+            echo -e "$RUN_IDS" | while read -r run_id; do
+              if [ -n "$run_id" ]; then
+                echo "- [${run_id}](https://github.com/ROCm/TheRock/actions/runs/${run_id})" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          fi
+
+          # Add SDK URLs section (for nightly builds)
+          if [ -n "$SDK_URLS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
+            echo -e "$SDK_URLS" | while read -r url; do
+              if [ -n "$url" ]; then
+                echo "- ${url}" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          fi

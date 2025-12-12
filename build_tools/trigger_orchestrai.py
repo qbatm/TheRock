@@ -149,7 +149,9 @@ def build_builds_json(
     gpu_arch_pattern: str,
     therock_sdk_url: str,
     commit_id: str,
-    pool_type: str = DEFAULT_POOL_TYPE
+    pool_type: str = DEFAULT_POOL_TYPE,
+    run_id: str = None,
+    amdgpu_family: str = None
 ) -> str:
     """
     Build the BUILDS_JSON parameter for the Jenkins job.
@@ -157,9 +159,11 @@ def build_builds_json(
     Args:
         platform_name: "ubuntu" or "windows"
         gpu_arch_pattern: Jenkins GPU pattern (e.g., "gpu_navi48xt")
-        therock_sdk_url: URL to the SDK tarball
+        therock_sdk_url: URL to the SDK tarball (for nightly builds)
         commit_id: GitHub commit SHA
         pool_type: Jenkins agent pool type
+        run_id: GitHub Actions workflow run ID (for bump PRs)
+        amdgpu_family: AMDGPU family for install_rocm_from_artifacts.py (e.g., "gfx120X-all")
 
     Returns:
         str: JSON string for BUILDS_JSON parameter
@@ -169,12 +173,17 @@ def build_builds_json(
             "the_rock": {
                 "platform": platform_name.lower(),
                 "gpu_arch_pattern": gpu_arch_pattern,
-                "therock_sdk_url": therock_sdk_url,
+                "therock_sdk_url": therock_sdk_url or "",
                 "pool_type": pool_type,
                 "gh_commit_id": commit_id
             }
         }
     }
+    # Add run_id if provided (for bump PRs that need install_rocm_from_artifacts.py)
+    if run_id:
+        payload["use_case"]["the_rock"]["run_id"] = run_id
+    if amdgpu_family:
+        payload["use_case"]["the_rock"]["amdgpu_family"] = amdgpu_family
     return json.dumps(payload)
 
 
@@ -183,7 +192,8 @@ def generate_trigger_configs(
     commit_id: str,
     gpu_mapping: dict = None,
     pool_type: str = DEFAULT_POOL_TYPE,
-    sdk_url_override: str = None
+    sdk_url_override: str = None,
+    run_id: str = None
 ) -> list:
     """
     Generate all Jenkins trigger configurations for a given platform.
@@ -191,12 +201,18 @@ def generate_trigger_configs(
     This mimics the behavior of sent_email.py which sends one email per GPU tag,
     allowing Jenkins to run tests on each GPU type.
 
+    For bump PRs (run_id provided), the SDK URL is left empty and Jenkins will use
+    install_rocm_from_artifacts.py to consolidate the artifacts.
+
+    For nightly builds (sdk_url provided), the tarball URL is passed directly.
+
     Args:
         platform_name: "linux" or "windows"
         commit_id: GitHub commit SHA
         gpu_mapping: Optional custom GPU mapping (defaults to GPU_MAPPING)
         pool_type: Jenkins agent pool type
         sdk_url_override: Optional SDK URL override (skips S3 lookup)
+        run_id: GitHub Actions workflow run ID (for bump PRs)
 
     Returns:
         list: List of dicts with 'builds_json' and metadata for each trigger
@@ -204,8 +220,11 @@ def generate_trigger_configs(
     if gpu_mapping is None:
         gpu_mapping = GPU_MAPPING
 
+    # For bump PRs with run_id, we don't need S3 lookup
+    is_bump_pr = bool(run_id)
+
     s3_bucket_url = S3_BUCKETS.get(platform_name.lower())
-    if not s3_bucket_url:
+    if not s3_bucket_url and not is_bump_pr:
         print(f"ERROR: Unknown platform '{platform_name}'", file=sys.stderr)
         return []
 
@@ -218,13 +237,15 @@ def generate_trigger_configs(
         # Build the full architecture pattern with platform prefix
         full_arch_pattern = f"{platform_name.lower()}-{arch_pattern}"
 
-        # Get the SDK URL (either from override or S3 lookup)
-        if sdk_url_override:
+        # For bump PRs, SDK URL is empty (Jenkins will use install_rocm_from_artifacts.py)
+        if is_bump_pr:
+            sdk_url = ""
+        elif sdk_url_override:
             sdk_url = sdk_url_override
         else:
             sdk_url = get_latest_s3_tarball(s3_bucket_url, full_arch_pattern)
 
-        if not sdk_url:
+        if not sdk_url and not is_bump_pr:
             print(f"WARNING: No SDK tarball found for {full_arch_pattern}, skipping", file=sys.stderr)
             continue
 
@@ -239,7 +260,9 @@ def generate_trigger_configs(
                 gpu_arch_pattern=gpu_tag,
                 therock_sdk_url=sdk_url,
                 commit_id=commit_id,
-                pool_type=pool_type
+                pool_type=pool_type,
+                run_id=run_id,
+                amdgpu_family=arch_pattern
             )
 
             configs.append({
@@ -247,10 +270,14 @@ def generate_trigger_configs(
                 "arch_pattern": arch_pattern,
                 "gpu_tag": gpu_tag,
                 "sdk_url": sdk_url,
+                "run_id": run_id or "",
                 "platform": jenkins_platform
             })
 
-            print(f"Generated config for {gpu_tag} on {jenkins_platform}")
+            if is_bump_pr:
+                print(f"Generated config for {gpu_tag} on {jenkins_platform} (bump PR run_id: {run_id})")
+            else:
+                print(f"Generated config for {gpu_tag} on {jenkins_platform}")
 
     return configs
 
@@ -362,7 +389,10 @@ def output_for_github_actions(configs: list, output_file: str = None):
 
     for i, config in enumerate(configs, 1):
         print(f"\n[{i}] {config['gpu_tag']} ({config['platform']})")
-        print(f"    SDK URL: {config['sdk_url']}")
+        if config.get('run_id'):
+            print(f"    Run ID: {config['run_id']}")
+        if config.get('sdk_url'):
+            print(f"    SDK URL: {config['sdk_url']}")
         print(f"    BUILDS_JSON: {config['builds_json']}")
 
     return configs_json
@@ -402,7 +432,11 @@ def main():
     )
     parser.add_argument(
         "--sdk-url",
-        help="Override SDK URL (skips S3 lookup)"
+        help="Override SDK URL (skips S3 lookup, for nightly builds)"
+    )
+    parser.add_argument(
+        "--run-id",
+        help="GitHub Actions workflow run ID (for bump PRs, uses install_rocm_from_artifacts.py)"
     )
     parser.add_argument(
         "--gpu-mapping-json",
@@ -457,7 +491,8 @@ def main():
         commit_id=args.commit_id,
         gpu_mapping=gpu_mapping,
         pool_type=args.pool_type,
-        sdk_url_override=args.sdk_url
+        sdk_url_override=args.sdk_url,
+        run_id=args.run_id
     )
 
     if not configs:
