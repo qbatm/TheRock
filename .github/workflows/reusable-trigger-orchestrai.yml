@@ -84,7 +84,6 @@ on:
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  # JENKINS_JOB_PATH: "job/ucicd-production-v1"
   JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
 
 jobs:
@@ -160,7 +159,7 @@ jobs:
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          UCICD_TRIGGER_TOKEN: ${{ secrets.UCICD_TRIGGER_TOKEN }}
+          JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_USER }}
         run: |
           echo "Triggering OrchestrAI for GPU: ${{ matrix.gpu_tag }} on ${{ matrix.platform }}"
 
@@ -180,7 +179,7 @@ jobs:
           # This bypasses CSRF protection and is the same method the old workflow used
           RESPONSE=$(curl -s -i -X POST \
             --user "${UCICD_USER}:${UCICD_TOKEN}" \
-            "${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/buildWithParameters?token=${UCICD_TRIGGER_TOKEN}&BUILDS_JSON=${ENCODED_BUILDS_JSON}")
+            "${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/buildWithParameters?token=${JENKINS_TRIGGER_TOKEN}&BUILDS_JSON=${ENCODED_BUILDS_JSON}")
 
           # Extract the queue URL from Location header
           QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
