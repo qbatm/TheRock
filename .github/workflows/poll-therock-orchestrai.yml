@@ -87,7 +87,7 @@ jobs:
           check_already_processed() {
             local run_id=$1
             local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
-            local platform=$3  # "linux" or "windows" (optional)
+            local platform=${3:-}  # "linux" or "windows" (optional, empty if not provided)
 
             # Build the search pattern - includes run_id and optionally platform
             local search_pattern="$run_id"
@@ -209,6 +209,34 @@ jobs:
           set -euo pipefail
 
           GITHUB_API="https://api.github.com"
+
+          # Function to check if we've already processed a run for a specific platform
+          check_already_processed() {
+            local run_id=$1
+            local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
+            local platform=${3:-}  # "linux" or "windows" (optional, empty if not provided)
+
+            # Build the search pattern - includes run_id and optionally platform
+            local search_pattern="$run_id"
+            if [ -n "$platform" ]; then
+              search_pattern="${run_id}.*${platform}"
+            fi
+
+            # Query our own repo for existing workflow runs triggered with this run_id (and platform)
+            # We search in the workflow run names which include the run_id and platform
+            local existing=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100" \
+              | jq -r --arg pattern "$search_pattern" '.workflow_runs[]? | select(.name | test($pattern)) | .id' 2>/dev/null | head -1 || echo "")
+
+            if [ -n "$existing" ]; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+
           # Get platform input - empty string means "all platforms"
           PLATFORM="${{ inputs.platform }}"
 
