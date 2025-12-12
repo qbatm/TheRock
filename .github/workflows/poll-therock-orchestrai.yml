@@ -105,15 +105,16 @@ jobs:
           echo "Discovering bump PRs from ${{ env.THEROCK_REPO }}..."
 
           # Query CI workflow runs for bump PRs
-          # Filter: actor is dependabot, event is pull_request, not skipped
+          # Use actor filter in API, then filter by date and other criteria in jq
+          # Note: gh api --jq doesn't support --arg, so we pipe to jq
           BUMP_RUNS=$(gh api \
             -H "Accept: application/vnd.github+json" \
-            "/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=50&created=>=${CUTOFF_TIME}" \
-            --jq '.workflow_runs | [.[] | select(
+            "/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&actor=dependabot%5Bbot%5D" \
+            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[] | select(
               (.conclusion == "success" or .conclusion == "failure") and
-              .actor.login == "dependabot[bot]" and
               .event == "pull_request" and
-              (.display_title | startswith("Bump"))
+              (.display_title | startswith("Bump")) and
+              (.created_at >= $cutoff)
             ) | {
               id: .id,
               run_number: .run_number,
@@ -148,13 +149,14 @@ jobs:
           echo "Discovering nightly builds from ${{ env.THEROCK_REPO }}..."
 
           # Query CI nightly workflow runs
-          # Filter: scheduled runs on main branch, not skipped
+          # Note: gh api --jq doesn't support --arg, so we pipe to jq
           NIGHTLY_RUNS=$(gh api \
             -H "Accept: application/vnd.github+json" \
-            "/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=50&branch=main&created=>=${CUTOFF_TIME}" \
-            --jq '.workflow_runs | [.[] | select(
+            "/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&branch=main" \
+            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[] | select(
               (.conclusion == "success" or .conclusion == "failure") and
-              .event == "schedule"
+              .event == "schedule" and
+              (.created_at >= $cutoff)
             ) | {
               id: .id,
               run_number: .run_number,
