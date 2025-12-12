@@ -64,7 +64,7 @@ jobs:
       - name: Discover new runs
         id: discover
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -75,22 +75,21 @@ jobs:
           CUTOFF_TIME=$(date -u -d "${LOOKBACK_HOURS} hours ago" +"%Y-%m-%dT%H:%M:%SZ")
           echo "Cutoff time: ${CUTOFF_TIME}"
 
+          # GitHub API base URL
+          GITHUB_API="https://api.github.com"
+
           # Function to check if we've already processed a run
           check_already_processed() {
             local run_id=$1
             local run_type=$2  # "bump" or "nightly"
 
-            # Check if a workflow run with this pattern exists in our repo
-            # We use the run name pattern: OrchestrAI-{type}-{run_id}
-            local pattern="OrchestrAI-${run_type}-${run_id}"
-
-            # Query our own repo for existing workflow runs with this display title
-            local existing=$(gh run list \
-              --repo "${{ github.repository }}" \
-              --workflow "poll-therock-orchestrai.yml" \
-              --limit 100 \
-              --json displayTitle,status \
-              --jq ".[] | select(.displayTitle | contains(\"${run_id}\")) | .status" 2>/dev/null || echo "")
+            # Query our own repo for existing workflow runs with this run_id in the name
+            # We look for job names like "OrchestrAI-bump-{run_id}" or "OrchestrAI-nightly-{run_id}"
+            local existing=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/poll-therock-orchestrai.yml/runs?per_page=100" \
+              | jq -r --arg run_id "$run_id" '.workflow_runs[] | select(.name | contains($run_id)) | .id' 2>/dev/null | head -1 || echo "")
 
             if [ -n "$existing" ]; then
               echo "true"
@@ -104,12 +103,12 @@ jobs:
           # =====================
           echo "Discovering bump PRs from ${{ env.THEROCK_REPO }}..."
 
-          # Query CI workflow runs for bump PRs
+          # Query CI workflow runs for bump PRs using curl
           # Use actor filter in API, then filter by date and other criteria in jq
-          # Note: gh api --jq doesn't support --arg, so we pipe to jq
-          BUMP_RUNS=$(gh api \
+          BUMP_RUNS=$(curl -s \
             -H "Accept: application/vnd.github+json" \
-            "/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&actor=dependabot%5Bbot%5D" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&actor=dependabot%5Bbot%5D" \
             | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[] | select(
               (.conclusion == "success" or .conclusion == "failure") and
               .event == "pull_request" and
@@ -148,11 +147,11 @@ jobs:
           # =====================
           echo "Discovering nightly builds from ${{ env.THEROCK_REPO }}..."
 
-          # Query CI nightly workflow runs
-          # Note: gh api --jq doesn't support --arg, so we pipe to jq
-          NIGHTLY_RUNS=$(gh api \
+          # Query CI nightly workflow runs using curl
+          NIGHTLY_RUNS=$(curl -s \
             -H "Accept: application/vnd.github+json" \
-            "/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&branch=main" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&branch=main" \
             | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[] | select(
               (.conclusion == "success" or .conclusion == "failure") and
               .event == "schedule" and
