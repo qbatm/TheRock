@@ -1,0 +1,73 @@
+name: OrchestrAI - Bump PR
+
+# This workflow is triggered by poll-therock-orchestrai.yml when a new bump PR
+# is discovered from ROCm/TheRock. It uses the reusable-trigger-orchestrai.yml
+# workflow to trigger and poll Jenkins jobs.
+#
+# For bump PRs, we pass the run_id and Jenkins uses install_rocm_from_artifacts.py
+# to download artifacts directly from the GitHub Actions run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'GitHub Actions workflow run ID from ROCm/TheRock'
+        required: true
+        type: string
+      run_url:
+        description: 'URL to the GitHub Actions workflow run'
+        required: false
+        type: string
+        default: ''
+      run_title:
+        description: 'Title/description of the workflow run'
+        required: false
+        type: string
+        default: ''
+      run_conclusion:
+        description: 'Conclusion of the workflow run (success/failure)'
+        required: false
+        type: string
+        default: ''
+      platform:
+        description: 'Platform to trigger (linux or windows)'
+        required: false
+        type: choice
+        options:
+          - linux
+          - windows
+        default: linux
+
+jobs:
+  trigger-orchestrai:
+    name: Trigger OrchestrAI for Bump PR
+    uses: ./.github/workflows/reusable-trigger-orchestrai.yml
+    with:
+      platform: ${{ inputs.platform }}
+      run_id: ${{ inputs.run_id }}
+    secrets:
+      UCICD_USER: ${{ secrets.UCICD_USER }}
+      UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+
+  summary:
+    name: Bump PR Summary
+    needs: trigger-orchestrai
+    if: always()
+    runs-on: arc-lnx-pub
+    steps:
+      - name: Write Bump PR Summary
+        run: |
+          echo "## OrchestrAI - Bump PR Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ inputs.run_id }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.run_url }}" ]; then
+            echo "**TheRock Run:** [${{ inputs.run_id }}](${{ inputs.run_url }})" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.run_title }}" ]; then
+            echo "**Title:** ${{ inputs.run_title }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.run_conclusion }}" ]; then
+            echo "**TheRock Conclusion:** ${{ inputs.run_conclusion }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**OrchestrAI Result:** ${{ needs.trigger-orchestrai.result }}" >> $GITHUB_STEP_SUMMARY

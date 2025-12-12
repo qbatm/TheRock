@@ -4,7 +4,10 @@ name: Poll TheRock for OrchestrAI
 # 1. Bump PRs - dependabot PRs with title starting with "Bump"
 # 2. Nightly builds - scheduled CI nightly runs
 #
-# For each discovered run, it triggers the OrchestrAI Jenkins job to run tests.
+# For each discovered run, it triggers a downstream workflow:
+# - orchestrai-bump.yml for bump PRs
+# - orchestrai-nightly.yml for nightly builds
+#
 # State tracking is done via workflow run naming to avoid maintaining a database.
 
 on:
@@ -20,7 +23,7 @@ on:
         type: number
         default: 1
       dry_run:
-        description: 'Dry run mode (do not trigger Jenkins)'
+        description: 'Dry run mode (do not trigger downstream workflows)'
         required: false
         type: boolean
         default: false
@@ -36,6 +39,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/poll-therock-orchestrai.yml'
+      - '.github/workflows/orchestrai-bump.yml'
+      - '.github/workflows/orchestrai-nightly.yml'
       - '.github/workflows/reusable-trigger-orchestrai.yml'
       - 'build_tools/trigger_orchestrai.py'
 
@@ -44,19 +49,19 @@ env:
   # Workflow IDs for the CI workflows we want to poll
   CI_WORKFLOW: "ci.yml"
   CI_NIGHTLY_WORKFLOW: "ci_nightly.yml"
-  # Lookback period in hours (default 1 hour)
+  # Lookback period in hours (default 8 hours for scheduled runs)
   DEFAULT_LOOKBACK_HOURS: 8
 
 jobs:
-  # Job to discover new runs from TheRock repo
-  discover-runs:
-    name: Discover TheRock Runs
+  # Job to discover new runs from TheRock repo and trigger downstream workflows
+  discover-and-trigger:
+    name: Discover and Trigger
     runs-on: arc-lnx-pub
     outputs:
-      bump_runs: ${{ steps.discover.outputs.bump_runs }}
-      nightly_runs: ${{ steps.discover.outputs.nightly_runs }}
-      has_bump_runs: ${{ steps.discover.outputs.has_bump_runs }}
-      has_nightly_runs: ${{ steps.discover.outputs.has_nightly_runs }}
+      bump_count: ${{ steps.discover.outputs.bump_count }}
+      nightly_count: ${{ steps.discover.outputs.nightly_count }}
+      triggered_bump: ${{ steps.trigger.outputs.triggered_bump }}
+      triggered_nightly: ${{ steps.trigger.outputs.triggered_nightly }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -81,15 +86,15 @@ jobs:
           # Function to check if we've already processed a run
           check_already_processed() {
             local run_id=$1
-            local run_type=$2  # "bump" or "nightly"
+            local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
 
-            # Query our own repo for existing workflow runs with this run_id in the name
-            # We look for job names like "OrchestrAI-bump-{run_id}" or "OrchestrAI-nightly-{run_id}"
+            # Query our own repo for existing workflow runs triggered with this run_id
+            # We search in the workflow run names which include the run_id
             local existing=$(curl -s \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/poll-therock-orchestrai.yml/runs?per_page=100" \
-              | jq -r --arg run_id "$run_id" '.workflow_runs[] | select(.name | contains($run_id)) | .id' 2>/dev/null | head -1 || echo "")
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100" \
+              | jq -r --arg run_id "$run_id" '.workflow_runs[]? | select(.name | contains($run_id)) | .id' 2>/dev/null | head -1 || echo "")
 
             if [ -n "$existing" ]; then
               echo "true"
@@ -104,12 +109,11 @@ jobs:
           echo "Discovering bump PRs from ${{ env.THEROCK_REPO }}..."
 
           # Query CI workflow runs for bump PRs using curl
-          # Use actor filter in API, then filter by date and other criteria in jq
           BUMP_RUNS=$(curl -s \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&actor=dependabot%5Bbot%5D" \
-            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[] | select(
+            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
               (.conclusion == "success" or .conclusion == "failure") and
               .event == "pull_request" and
               (.display_title | startswith("Bump")) and
@@ -129,8 +133,8 @@ jobs:
 
           # Filter out already processed runs
           FILTERED_BUMP_RUNS="[]"
-          for run_id in $(echo "$BUMP_RUNS" | jq -r '.[].id'); do
-            already_processed=$(check_already_processed "$run_id" "bump")
+          for run_id in $(echo "$BUMP_RUNS" | jq -r '.[]?.id // empty'); do
+            already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml")
             if [ "$already_processed" = "false" ]; then
               run_json=$(echo "$BUMP_RUNS" | jq ".[] | select(.id == $run_id)")
               FILTERED_BUMP_RUNS=$(echo "$FILTERED_BUMP_RUNS" | jq ". + [$run_json]")
@@ -152,7 +156,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&branch=main" \
-            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[] | select(
+            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
               (.conclusion == "success" or .conclusion == "failure") and
               .event == "schedule" and
               (.created_at >= $cutoff)
@@ -171,8 +175,8 @@ jobs:
 
           # Filter out already processed runs
           FILTERED_NIGHTLY_RUNS="[]"
-          for run_id in $(echo "$NIGHTLY_RUNS" | jq -r '.[].id'); do
-            already_processed=$(check_already_processed "$run_id" "nightly")
+          for run_id in $(echo "$NIGHTLY_RUNS" | jq -r '.[]?.id // empty'); do
+            already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml")
             if [ "$already_processed" = "false" ]; then
               run_json=$(echo "$NIGHTLY_RUNS" | jq ".[] | select(.id == $run_id)")
               FILTERED_NIGHTLY_RUNS=$(echo "$FILTERED_NIGHTLY_RUNS" | jq ". + [$run_json]")
@@ -184,22 +188,11 @@ jobs:
 
           echo "Filtered nightly runs: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
 
-          # Output results
-          echo "bump_runs=$(echo "$FILTERED_BUMP_RUNS" | jq -c '.')" >> $GITHUB_OUTPUT
-          echo "nightly_runs=$(echo "$FILTERED_NIGHTLY_RUNS" | jq -c '.')" >> $GITHUB_OUTPUT
-
-          # Set flags for conditional job execution
-          if [ "$(echo "$FILTERED_BUMP_RUNS" | jq 'length')" -gt 0 ]; then
-            echo "has_bump_runs=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_bump_runs=false" >> $GITHUB_OUTPUT
-          fi
-
-          if [ "$(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')" -gt 0 ]; then
-            echo "has_nightly_runs=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_nightly_runs=false" >> $GITHUB_OUTPUT
-          fi
+          # Output results as base64 to avoid JSON escaping issues
+          echo "bump_runs_b64=$(echo "$FILTERED_BUMP_RUNS" | base64 -w0)" >> $GITHUB_OUTPUT
+          echo "nightly_runs_b64=$(echo "$FILTERED_NIGHTLY_RUNS" | base64 -w0)" >> $GITHUB_OUTPUT
+          echo "bump_count=$(echo "$FILTERED_BUMP_RUNS" | jq 'length')" >> $GITHUB_OUTPUT
+          echo "nightly_count=$(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')" >> $GITHUB_OUTPUT
 
           # Summary
           echo ""
@@ -209,492 +202,169 @@ jobs:
           echo "Bump PRs to process: $(echo "$FILTERED_BUMP_RUNS" | jq 'length')"
           echo "Nightly builds to process: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
 
-      - name: Write Discovery Summary
+      - name: Trigger downstream workflows
+        id: trigger
+        if: inputs.dry_run != true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "## TheRock Run Discovery" >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+
+          GITHUB_API="https://api.github.com"
+          PLATFORM="${{ inputs.platform || 'linux' }}"
+
+          # Decode the base64 encoded JSON
+          BUMP_RUNS=$(echo "${{ steps.discover.outputs.bump_runs_b64 }}" | base64 -d)
+          NIGHTLY_RUNS=$(echo "${{ steps.discover.outputs.nightly_runs_b64 }}" | base64 -d)
+
+          TRIGGERED_BUMP="[]"
+          TRIGGERED_NIGHTLY="[]"
+
+          # =====================
+          # Trigger Bump PR workflows
+          # =====================
+          echo "Triggering bump PR workflows..."
+          BUMP_COUNT=$(echo "$BUMP_RUNS" | jq 'length')
+
+          for i in $(seq 0 $((BUMP_COUNT - 1))); do
+            run=$(echo "$BUMP_RUNS" | jq ".[$i]")
+            run_id=$(echo "$run" | jq -r '.id')
+            run_url=$(echo "$run" | jq -r '.html_url')
+            run_title=$(echo "$run" | jq -r '.display_title')
+            run_conclusion=$(echo "$run" | jq -r '.conclusion')
+
+            echo "  Triggering orchestrai-bump for run $run_id..."
+
+            # Trigger the workflow using the GitHub API
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-bump.yml/dispatches" \
+              -d "{
+                \"ref\": \"${{ github.ref_name }}\",
+                \"inputs\": {
+                  \"run_id\": \"${run_id}\",
+                  \"run_url\": \"${run_url}\",
+                  \"run_title\": \"${run_title}\",
+                  \"run_conclusion\": \"${run_conclusion}\",
+                  \"platform\": \"${PLATFORM}\"
+                }
+              }")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+
+            if [ "$HTTP_CODE" = "204" ]; then
+              echo "    ✅ Triggered successfully"
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"triggered\"}]")
+            else
+              echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+            fi
+          done
+
+          # =====================
+          # Trigger Nightly workflows
+          # =====================
+          echo "Triggering nightly workflows..."
+          NIGHTLY_COUNT=$(echo "$NIGHTLY_RUNS" | jq 'length')
+
+          for i in $(seq 0 $((NIGHTLY_COUNT - 1))); do
+            run=$(echo "$NIGHTLY_RUNS" | jq ".[$i]")
+            run_id=$(echo "$run" | jq -r '.id')
+            run_url=$(echo "$run" | jq -r '.html_url')
+            run_title=$(echo "$run" | jq -r '.display_title')
+            run_conclusion=$(echo "$run" | jq -r '.conclusion')
+            head_sha=$(echo "$run" | jq -r '.head_sha')
+
+            echo "  Triggering orchestrai-nightly for run $run_id..."
+
+            # Trigger the workflow using the GitHub API
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-nightly.yml/dispatches" \
+              -d "{
+                \"ref\": \"${{ github.ref_name }}\",
+                \"inputs\": {
+                  \"run_id\": \"${run_id}\",
+                  \"run_url\": \"${run_url}\",
+                  \"run_title\": \"${run_title}\",
+                  \"run_conclusion\": \"${run_conclusion}\",
+                  \"head_sha\": \"${head_sha}\",
+                  \"platform\": \"${PLATFORM}\"
+                }
+              }")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+
+            if [ "$HTTP_CODE" = "204" ]; then
+              echo "    ✅ Triggered successfully"
+              TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"triggered\"}]")
+            else
+              echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
+              TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+            fi
+          done
+
+          echo "triggered_bump=$(echo "$TRIGGERED_BUMP" | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "triggered_nightly=$(echo "$TRIGGERED_NIGHTLY" | jq -c '.')" >> $GITHUB_OUTPUT
+
+      - name: Write Summary
+        run: |
+          echo "## TheRock OrchestrAI Polling Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Lookback:** ${{ inputs.lookback_hours || env.DEFAULT_LOOKBACK_HOURS }} hours" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry Run:** ${{ inputs.dry_run || 'false' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          BUMP_RUNS='${{ steps.discover.outputs.bump_runs }}'
-          NIGHTLY_RUNS='${{ steps.discover.outputs.nightly_runs }}'
+          # Decode the base64 encoded JSON
+          BUMP_RUNS=$(echo "${{ steps.discover.outputs.bump_runs_b64 }}" | base64 -d)
+          NIGHTLY_RUNS=$(echo "${{ steps.discover.outputs.nightly_runs_b64 }}" | base64 -d)
 
-          echo "### Bump PRs" >> $GITHUB_STEP_SUMMARY
-          if [ "$(echo "$BUMP_RUNS" | jq 'length')" -gt 0 ]; then
+          echo "### Discovered Runs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "#### Bump PRs (${{ steps.discover.outputs.bump_count }})" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.discover.outputs.bump_count }}" -gt 0 ]; then
             echo "| Run ID | Title | Conclusion | Created |" >> $GITHUB_STEP_SUMMARY
             echo "|--------|-------|------------|---------|" >> $GITHUB_STEP_SUMMARY
-            echo "$BUMP_RUNS" | jq -r '.[] | "| \(.id) | \(.display_title) | \(.conclusion) | \(.created_at) |"' >> $GITHUB_STEP_SUMMARY
+            echo "$BUMP_RUNS" | jq -r '.[] | "| [\(.id)](\(.html_url)) | \(.display_title) | \(.conclusion) | \(.created_at) |"' >> $GITHUB_STEP_SUMMARY
           else
             echo "_No new bump PRs found_" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Nightly Builds" >> $GITHUB_STEP_SUMMARY
-          if [ "$(echo "$NIGHTLY_RUNS" | jq 'length')" -gt 0 ]; then
+          echo "#### Nightly Builds (${{ steps.discover.outputs.nightly_count }})" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.discover.outputs.nightly_count }}" -gt 0 ]; then
             echo "| Run ID | Title | Conclusion | Created |" >> $GITHUB_STEP_SUMMARY
             echo "|--------|-------|------------|---------|" >> $GITHUB_STEP_SUMMARY
-            echo "$NIGHTLY_RUNS" | jq -r '.[] | "| \(.id) | \(.display_title) | \(.conclusion) | \(.created_at) |"' >> $GITHUB_STEP_SUMMARY
+            echo "$NIGHTLY_RUNS" | jq -r '.[] | "| [\(.id)](\(.html_url)) | \(.display_title) | \(.conclusion) | \(.created_at) |"' >> $GITHUB_STEP_SUMMARY
           else
             echo "_No new nightly builds found_" >> $GITHUB_STEP_SUMMARY
           fi
 
-  # Process bump PRs
-  process-bump-prs:
-    name: "OrchestrAI-bump-${{ matrix.run.id }}"
-    needs: discover-runs
-    if: needs.discover-runs.outputs.has_bump_runs == 'true' && github.event.inputs.dry_run != 'true'
-    runs-on: arc-lnx-pub
-    environment: ucicd
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        run: ${{ fromJson(needs.discover-runs.outputs.bump_runs) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Triggered Workflows" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
+            TRIGGERED_BUMP='${{ steps.trigger.outputs.triggered_bump }}'
+            TRIGGERED_NIGHTLY='${{ steps.trigger.outputs.triggered_nightly }}'
 
-      - name: Generate trigger configurations
-        id: generate_configs
-        run: |
-          echo "Generating OrchestrAI trigger configs for bump PR run: ${{ matrix.run.id }}"
-          echo "Title: ${{ matrix.run.display_title }}"
-          echo "Conclusion: ${{ matrix.run.conclusion }}"
-
-          # Determine platform from inputs or default to linux
-          PLATFORM="${{ inputs.platform || 'linux' }}"
-
-          python build_tools/trigger_orchestrai.py \
-            --mode generate \
-            --platform "${PLATFORM}" \
-            --commit-id "${{ matrix.run.head_sha }}" \
-            --run-id "${{ matrix.run.id }}" \
-            --github-output $GITHUB_OUTPUT
-
-          # Read the trigger configs
-          TRIGGER_CONFIGS=$(grep -oP 'trigger_configs=\K.*' $GITHUB_OUTPUT || echo "[]")
-          echo "Generated $(echo "$TRIGGER_CONFIGS" | jq 'length') configurations"
-
-      - name: Trigger Jenkins Jobs
-        id: trigger_jenkins
-        env:
-          UCICD_USER: ${{ secrets.UCICD_USER }}
-          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          JENKINS_URL: "https://ucicd-jenkins.amd.com"
-          JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
-        run: |
-          TRIGGER_CONFIGS='${{ steps.generate_configs.outputs.trigger_configs }}'
-
-          # Track results
-          RESULTS="[]"
-          SUCCESS_COUNT=0
-          FAIL_COUNT=0
-
-          for config in $(echo "$TRIGGER_CONFIGS" | jq -c '.[]'); do
-            GPU_TAG=$(echo "$config" | jq -r '.gpu_tag')
-            BUILDS_JSON=$(echo "$config" | jq -r '.builds_json')
-
-            echo "Triggering Jenkins for GPU: ${GPU_TAG}"
-
-            # URL-encode BUILDS_JSON
-            ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
-
-            # Trigger Jenkins
-            RESPONSE=$(curl -s -i -X POST \
-              --user "${UCICD_USER}:${UCICD_TOKEN}" \
-              "${JENKINS_URL}/${JENKINS_JOB_PATH}/buildWithParameters?token=${UCICD_USER}&BUILDS_JSON=${ENCODED_BUILDS_JSON}")
-
-            QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
-
-            if [ -n "$QUEUE_URL" ]; then
-              echo "  ✅ Triggered: ${QUEUE_URL}"
-
-              # Wait for build number
-              BUILD_NUMBER=""
-              for i in $(seq 1 60); do
-                QUEUE_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" "${QUEUE_URL}api/json")
-                BUILD_NUMBER=$(echo "$QUEUE_INFO" | jq -r '.executable.number // empty')
-                if [ -n "$BUILD_NUMBER" ]; then
-                  break
-                fi
-                sleep 5
-              done
-
-              if [ -n "$BUILD_NUMBER" ]; then
-                echo "  Build number: ${BUILD_NUMBER}"
-                RESULT_ENTRY=$(jq -n \
-                  --arg gpu "$GPU_TAG" \
-                  --arg build_num "$BUILD_NUMBER" \
-                  --arg queue_url "$QUEUE_URL" \
-                  '{gpu_tag: $gpu, build_number: $build_num, queue_url: $queue_url, status: "triggered"}')
-                RESULTS=$(echo "$RESULTS" | jq ". + [$RESULT_ENTRY]")
-                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-              else
-                echo "  ⚠️ Build number not available yet"
-                RESULT_ENTRY=$(jq -n \
-                  --arg gpu "$GPU_TAG" \
-                  --arg queue_url "$QUEUE_URL" \
-                  '{gpu_tag: $gpu, queue_url: $queue_url, status: "queued"}')
-                RESULTS=$(echo "$RESULTS" | jq ". + [$RESULT_ENTRY]")
-                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-              fi
-            else
-              echo "  ❌ Failed to trigger"
-              RESULT_ENTRY=$(jq -n --arg gpu "$GPU_TAG" '{gpu_tag: $gpu, status: "failed"}')
-              RESULTS=$(echo "$RESULTS" | jq ". + [$RESULT_ENTRY]")
-              FAIL_COUNT=$((FAIL_COUNT + 1))
+            if [ -n "$TRIGGERED_BUMP" ] && [ "$TRIGGERED_BUMP" != "[]" ]; then
+              echo "#### Bump PR Workflows" >> $GITHUB_STEP_SUMMARY
+              echo "| Run ID | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$TRIGGERED_BUMP" | jq -r '.[] | "| \(.run_id) | \(.status) |"' >> $GITHUB_STEP_SUMMARY
             fi
-          done
 
-          echo "jenkins_results=$(echo "$RESULTS" | jq -c '.')" >> $GITHUB_OUTPUT
-          echo "success_count=${SUCCESS_COUNT}" >> $GITHUB_OUTPUT
-          echo "fail_count=${FAIL_COUNT}" >> $GITHUB_OUTPUT
-
-      - name: Poll for Jenkins Completion
-        id: poll_jenkins
-        env:
-          UCICD_USER: ${{ secrets.UCICD_USER }}
-          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          JENKINS_URL: "https://ucicd-jenkins.amd.com"
-          JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
-        run: |
-          JENKINS_RESULTS='${{ steps.trigger_jenkins.outputs.jenkins_results }}'
-
-          POLLING_INTERVAL=300  # 5 minutes
-          TIMEOUT_SECONDS=14400  # 4 hours
-          START_TIME=$(date +%s)
-
-          FINAL_RESULTS="[]"
-
-          for result in $(echo "$JENKINS_RESULTS" | jq -c '.[] | select(.build_number != null)'); do
-            BUILD_NUMBER=$(echo "$result" | jq -r '.build_number')
-            GPU_TAG=$(echo "$result" | jq -r '.gpu_tag')
-            BUILD_URL="${JENKINS_URL}/${JENKINS_JOB_PATH}/${BUILD_NUMBER}"
-
-            echo "Polling build ${BUILD_NUMBER} for ${GPU_TAG}..."
-
-            while true; do
-              CURRENT_TIME=$(date +%s)
-              ELAPSED=$((CURRENT_TIME - START_TIME))
-
-              if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
-                echo "::warning::Timeout waiting for build ${BUILD_NUMBER}"
-                FINAL_RESULT=$(echo "$result" | jq '. + {jenkins_result: "TIMEOUT"}')
-                FINAL_RESULTS=$(echo "$FINAL_RESULTS" | jq ". + [$FINAL_RESULT]")
-                break
-              fi
-
-              BUILD_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" "${BUILD_URL}/api/json")
-              BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
-
-              if [ "$BUILDING" = "false" ]; then
-                JENKINS_RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
-                echo "Build ${BUILD_NUMBER} completed: ${JENKINS_RESULT}"
-                FINAL_RESULT=$(echo "$result" | jq --arg res "$JENKINS_RESULT" '. + {jenkins_result: $res}')
-                FINAL_RESULTS=$(echo "$FINAL_RESULTS" | jq ". + [$FINAL_RESULT]")
-                break
-              fi
-
-              echo "Build ${BUILD_NUMBER} still running... (elapsed: ${ELAPSED}s)"
-              sleep $POLLING_INTERVAL
-            done
-          done
-
-          echo "final_results=$(echo "$FINAL_RESULTS" | jq -c '.')" >> $GITHUB_OUTPUT
-
-      - name: Write Summary
-        run: |
-          echo "## OrchestrAI Results - Bump PR" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**TheRock Run:** [${{ matrix.run.id }}](${{ matrix.run.html_url }})" >> $GITHUB_STEP_SUMMARY
-          echo "**Title:** ${{ matrix.run.display_title }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Conclusion:** ${{ matrix.run.conclusion }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          FINAL_RESULTS='${{ steps.poll_jenkins.outputs.final_results }}'
-
-          if [ -n "$FINAL_RESULTS" ] && [ "$FINAL_RESULTS" != "[]" ]; then
-            echo "| GPU Target | Build Number | Result |" >> $GITHUB_STEP_SUMMARY
-            echo "|------------|--------------|--------|" >> $GITHUB_STEP_SUMMARY
-            echo "$FINAL_RESULTS" | jq -r '.[] | "| \(.gpu_tag) | \(.build_number) | \(.jenkins_result) |"' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "_No Jenkins results available_" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  # Process nightly builds
-  process-nightly-builds:
-    name: "OrchestrAI-nightly-${{ matrix.run.id }}"
-    needs: discover-runs
-    if: needs.discover-runs.outputs.has_nightly_runs == 'true' && github.event.inputs.dry_run != 'true'
-    runs-on: arc-lnx-pub
-    environment: ucicd
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        run: ${{ fromJson(needs.discover-runs.outputs.nightly_runs) }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-
-      - name: Generate trigger configurations
-        id: generate_configs
-        run: |
-          echo "Generating OrchestrAI trigger configs for nightly run: ${{ matrix.run.id }}"
-          echo "Title: ${{ matrix.run.display_title }}"
-          echo "Conclusion: ${{ matrix.run.conclusion }}"
-
-          # Determine platform from inputs or default to linux
-          PLATFORM="${{ inputs.platform || 'linux' }}"
-
-          # For nightly builds, we use S3 lookup (no run_id)
-          python build_tools/trigger_orchestrai.py \
-            --mode generate \
-            --platform "${PLATFORM}" \
-            --commit-id "${{ matrix.run.head_sha }}" \
-            --github-output $GITHUB_OUTPUT
-
-          # Read the trigger configs
-          TRIGGER_CONFIGS=$(grep -oP 'trigger_configs=\K.*' $GITHUB_OUTPUT || echo "[]")
-          echo "Generated $(echo "$TRIGGER_CONFIGS" | jq 'length') configurations"
-
-      - name: Trigger Jenkins Jobs
-        id: trigger_jenkins
-        env:
-          UCICD_USER: ${{ secrets.UCICD_USER }}
-          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          JENKINS_URL: "https://ucicd-jenkins.amd.com"
-          JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
-        run: |
-          TRIGGER_CONFIGS='${{ steps.generate_configs.outputs.trigger_configs }}'
-
-          # Track results
-          RESULTS="[]"
-          SUCCESS_COUNT=0
-          FAIL_COUNT=0
-
-          for config in $(echo "$TRIGGER_CONFIGS" | jq -c '.[]'); do
-            GPU_TAG=$(echo "$config" | jq -r '.gpu_tag')
-            BUILDS_JSON=$(echo "$config" | jq -r '.builds_json')
-            SDK_URL=$(echo "$config" | jq -r '.sdk_url')
-
-            echo "Triggering Jenkins for GPU: ${GPU_TAG}"
-            echo "  SDK URL: ${SDK_URL}"
-
-            # URL-encode BUILDS_JSON
-            ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
-
-            # Trigger Jenkins
-            RESPONSE=$(curl -s -i -X POST \
-              --user "${UCICD_USER}:${UCICD_TOKEN}" \
-              "${JENKINS_URL}/${JENKINS_JOB_PATH}/buildWithParameters?token=${UCICD_USER}&BUILDS_JSON=${ENCODED_BUILDS_JSON}")
-
-            QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
-
-            if [ -n "$QUEUE_URL" ]; then
-              echo "  ✅ Triggered: ${QUEUE_URL}"
-
-              # Wait for build number
-              BUILD_NUMBER=""
-              for i in $(seq 1 60); do
-                QUEUE_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" "${QUEUE_URL}api/json")
-                BUILD_NUMBER=$(echo "$QUEUE_INFO" | jq -r '.executable.number // empty')
-                if [ -n "$BUILD_NUMBER" ]; then
-                  break
-                fi
-                sleep 5
-              done
-
-              if [ -n "$BUILD_NUMBER" ]; then
-                echo "  Build number: ${BUILD_NUMBER}"
-                RESULT_ENTRY=$(jq -n \
-                  --arg gpu "$GPU_TAG" \
-                  --arg build_num "$BUILD_NUMBER" \
-                  --arg queue_url "$QUEUE_URL" \
-                  --arg sdk_url "$SDK_URL" \
-                  '{gpu_tag: $gpu, build_number: $build_num, queue_url: $queue_url, sdk_url: $sdk_url, status: "triggered"}')
-                RESULTS=$(echo "$RESULTS" | jq ". + [$RESULT_ENTRY]")
-                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-              else
-                echo "  ⚠️ Build number not available yet"
-                RESULT_ENTRY=$(jq -n \
-                  --arg gpu "$GPU_TAG" \
-                  --arg queue_url "$QUEUE_URL" \
-                  --arg sdk_url "$SDK_URL" \
-                  '{gpu_tag: $gpu, queue_url: $queue_url, sdk_url: $sdk_url, status: "queued"}')
-                RESULTS=$(echo "$RESULTS" | jq ". + [$RESULT_ENTRY]")
-                SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-              fi
-            else
-              echo "  ❌ Failed to trigger"
-              RESULT_ENTRY=$(jq -n --arg gpu "$GPU_TAG" '{gpu_tag: $gpu, status: "failed"}')
-              RESULTS=$(echo "$RESULTS" | jq ". + [$RESULT_ENTRY]")
-              FAIL_COUNT=$((FAIL_COUNT + 1))
+            if [ -n "$TRIGGERED_NIGHTLY" ] && [ "$TRIGGERED_NIGHTLY" != "[]" ]; then
+              echo "#### Nightly Workflows" >> $GITHUB_STEP_SUMMARY
+              echo "| Run ID | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$TRIGGERED_NIGHTLY" | jq -r '.[] | "| \(.run_id) | \(.status) |"' >> $GITHUB_STEP_SUMMARY
             fi
-          done
-
-          echo "jenkins_results=$(echo "$RESULTS" | jq -c '.')" >> $GITHUB_OUTPUT
-          echo "success_count=${SUCCESS_COUNT}" >> $GITHUB_OUTPUT
-          echo "fail_count=${FAIL_COUNT}" >> $GITHUB_OUTPUT
-
-      - name: Poll for Jenkins Completion
-        id: poll_jenkins
-        env:
-          UCICD_USER: ${{ secrets.UCICD_USER }}
-          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          JENKINS_URL: "https://ucicd-jenkins.amd.com"
-          JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
-        run: |
-          JENKINS_RESULTS='${{ steps.trigger_jenkins.outputs.jenkins_results }}'
-
-          POLLING_INTERVAL=300  # 5 minutes
-          TIMEOUT_SECONDS=14400  # 4 hours
-          START_TIME=$(date +%s)
-
-          FINAL_RESULTS="[]"
-
-          for result in $(echo "$JENKINS_RESULTS" | jq -c '.[] | select(.build_number != null)'); do
-            BUILD_NUMBER=$(echo "$result" | jq -r '.build_number')
-            GPU_TAG=$(echo "$result" | jq -r '.gpu_tag')
-            BUILD_URL="${JENKINS_URL}/${JENKINS_JOB_PATH}/${BUILD_NUMBER}"
-
-            echo "Polling build ${BUILD_NUMBER} for ${GPU_TAG}..."
-
-            while true; do
-              CURRENT_TIME=$(date +%s)
-              ELAPSED=$((CURRENT_TIME - START_TIME))
-
-              if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
-                echo "::warning::Timeout waiting for build ${BUILD_NUMBER}"
-                FINAL_RESULT=$(echo "$result" | jq '. + {jenkins_result: "TIMEOUT"}')
-                FINAL_RESULTS=$(echo "$FINAL_RESULTS" | jq ". + [$FINAL_RESULT]")
-                break
-              fi
-
-              BUILD_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" "${BUILD_URL}/api/json")
-              BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
-
-              if [ "$BUILDING" = "false" ]; then
-                JENKINS_RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
-                echo "Build ${BUILD_NUMBER} completed: ${JENKINS_RESULT}"
-                FINAL_RESULT=$(echo "$result" | jq --arg res "$JENKINS_RESULT" '. + {jenkins_result: $res}')
-                FINAL_RESULTS=$(echo "$FINAL_RESULTS" | jq ". + [$FINAL_RESULT]")
-                break
-              fi
-
-              echo "Build ${BUILD_NUMBER} still running... (elapsed: ${ELAPSED}s)"
-              sleep $POLLING_INTERVAL
-            done
-          done
-
-          echo "final_results=$(echo "$FINAL_RESULTS" | jq -c '.')" >> $GITHUB_OUTPUT
-
-      - name: Fetch Test Results
-        id: test_results
-        env:
-          UCICD_USER: ${{ secrets.UCICD_USER }}
-          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          JENKINS_URL: "https://ucicd-jenkins.amd.com"
-          JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
-        run: |
-          FINAL_RESULTS='${{ steps.poll_jenkins.outputs.final_results }}'
-          TEST_SUMMARY="[]"
-
-          for result in $(echo "$FINAL_RESULTS" | jq -c '.[]'); do
-            BUILD_NUMBER=$(echo "$result" | jq -r '.build_number')
-            GPU_TAG=$(echo "$result" | jq -r '.gpu_tag')
-
-            if [ -n "$BUILD_NUMBER" ] && [ "$BUILD_NUMBER" != "null" ]; then
-              BUILD_URL="${JENKINS_URL}/${JENKINS_JOB_PATH}/${BUILD_NUMBER}"
-              TEST_RESULTS=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
-                "${BUILD_URL}/artifact/ucicd_test_results.json" 2>/dev/null || echo "")
-
-              if [ -n "$TEST_RESULTS" ] && echo "$TEST_RESULTS" | jq -e '.summary' > /dev/null 2>&1; then
-                TOTAL=$(echo "$TEST_RESULTS" | jq -r '.summary.total_tests // "N/A"')
-                PASSED=$(echo "$TEST_RESULTS" | jq -r '.summary.passed // "N/A"')
-                FAILED=$(echo "$TEST_RESULTS" | jq -r '.summary.failed // "N/A"')
-                SKIPPED=$(echo "$TEST_RESULTS" | jq -r '.summary.skipped // "N/A"')
-
-                ENTRY=$(jq -n \
-                  --arg gpu "$GPU_TAG" \
-                  --arg build "$BUILD_NUMBER" \
-                  --arg total "$TOTAL" \
-                  --arg passed "$PASSED" \
-                  --arg failed "$FAILED" \
-                  --arg skipped "$SKIPPED" \
-                  '{gpu_tag: $gpu, build_number: $build, total: $total, passed: $passed, failed: $failed, skipped: $skipped}')
-                TEST_SUMMARY=$(echo "$TEST_SUMMARY" | jq ". + [$ENTRY]")
-              fi
-            fi
-          done
-
-          echo "test_summary=$(echo "$TEST_SUMMARY" | jq -c '.')" >> $GITHUB_OUTPUT
-
-      - name: Write Summary
-        run: |
-          echo "## OrchestrAI Results - Nightly Build" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**TheRock Run:** [${{ matrix.run.id }}](${{ matrix.run.html_url }})" >> $GITHUB_STEP_SUMMARY
-          echo "**Title:** ${{ matrix.run.display_title }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Conclusion:** ${{ matrix.run.conclusion }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          FINAL_RESULTS='${{ steps.poll_jenkins.outputs.final_results }}'
-          TEST_SUMMARY='${{ steps.test_results.outputs.test_summary }}'
-
-          echo "### Jenkins Results" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$FINAL_RESULTS" ] && [ "$FINAL_RESULTS" != "[]" ]; then
-            echo "| GPU Target | Build Number | Result | SDK URL |" >> $GITHUB_STEP_SUMMARY
-            echo "|------------|--------------|--------|---------|" >> $GITHUB_STEP_SUMMARY
-            echo "$FINAL_RESULTS" | jq -r '.[] | "| \(.gpu_tag) | \(.build_number) | \(.jenkins_result) | \(.sdk_url // "N/A") |"' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "_No Jenkins results available_" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Results" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$TEST_SUMMARY" ] && [ "$TEST_SUMMARY" != "[]" ]; then
-            echo "| GPU Target | Build | Total | Passed | Failed | Skipped |" >> $GITHUB_STEP_SUMMARY
-            echo "|------------|-------|-------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
-            echo "$TEST_SUMMARY" | jq -r '.[] | "| \(.gpu_tag) | \(.build_number) | \(.total) | \(.passed) | \(.failed) | \(.skipped) |"' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "_No test results available_" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  # Consolidated summary of all runs
-  summary:
-    name: Overall Summary
-    needs: [discover-runs, process-bump-prs, process-nightly-builds]
-    if: always()
-    runs-on: arc-lnx-pub
-    steps:
-      - name: Generate Overall Summary
-        run: |
-          echo "## TheRock OrchestrAI Polling Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Run Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          BUMP_RUNS='${{ needs.discover-runs.outputs.bump_runs }}'
-          NIGHTLY_RUNS='${{ needs.discover-runs.outputs.nightly_runs }}'
-
-          echo "### Discovered Runs" >> $GITHUB_STEP_SUMMARY
-          echo "- **Bump PRs:** $(echo "$BUMP_RUNS" | jq 'length')" >> $GITHUB_STEP_SUMMARY
-          echo "- **Nightly Builds:** $(echo "$NIGHTLY_RUNS" | jq 'length')" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "${{ needs.process-bump-prs.result }}" != "skipped" ]; then
-            echo "### Bump PR Processing: ${{ needs.process-bump-prs.result }}" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${{ needs.process-nightly-builds.result }}" != "skipped" ]; then
-            echo "### Nightly Build Processing: ${{ needs.process-nightly-builds.result }}" >> $GITHUB_STEP_SUMMARY
           fi
