@@ -49,8 +49,8 @@ env:
   # Workflow IDs for the CI workflows we want to poll
   CI_WORKFLOW: "ci.yml"
   CI_NIGHTLY_WORKFLOW: "ci_nightly.yml"
-  # Lookback period in hours (default 8 hours for scheduled runs)
-  DEFAULT_LOOKBACK_HOURS: 8
+  # Lookback period in hours (default 1 hour for scheduled runs)
+  DEFAULT_LOOKBACK_HOURS: 1
 
 jobs:
   # Job to discover new runs from TheRock repo and trigger downstream workflows
@@ -209,7 +209,27 @@ jobs:
           set -euo pipefail
 
           GITHUB_API="https://api.github.com"
-          PLATFORM="${{ inputs.platform || 'linux' }}"
+          # Get platform input - empty string means "all platforms"
+          PLATFORM="${{ inputs.platform }}"
+
+          # Determine which platforms to trigger
+          # - If platform is empty (manual dispatch with "all"): trigger both linux and windows
+          # - If platform is specified: trigger only that platform
+          # - For scheduled runs (no input), we default to linux only
+          if [ -z "${PLATFORM}" ]; then
+            # Check if this is a scheduled run (no workflow_dispatch inputs)
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              # Scheduled runs default to linux only
+              PLATFORMS_TO_TRIGGER="linux"
+            else
+              # Manual dispatch with empty platform = trigger both
+              PLATFORMS_TO_TRIGGER="linux windows"
+            fi
+          else
+            PLATFORMS_TO_TRIGGER="${PLATFORM}"
+          fi
+
+          echo "Platforms to trigger: ${PLATFORMS_TO_TRIGGER}"
 
           # Decode the base64 encoded JSON
           BUMP_RUNS=$(echo "${{ steps.discover.outputs.bump_runs_b64 }}" | base64 -d)
@@ -224,9 +244,6 @@ jobs:
           echo "Triggering bump PR workflows..."
           BUMP_COUNT=$(echo "$BUMP_RUNS" | jq 'length')
 
-          # For bump PRs, use the specified platform or default to linux
-          BUMP_PLATFORM="${PLATFORM:-linux}"
-
           for i in $(seq 0 $((BUMP_COUNT - 1))); do
             run=$(echo "$BUMP_RUNS" | jq ".[$i]")
             run_id=$(echo "$run" | jq -r '.id')
@@ -234,34 +251,43 @@ jobs:
             run_title=$(echo "$run" | jq -r '.display_title')
             run_conclusion=$(echo "$run" | jq -r '.conclusion')
 
-            echo "  Triggering orchestrai-bump for run $run_id (${BUMP_PLATFORM})..."
+            for PLAT in $PLATFORMS_TO_TRIGGER; do
+              # Check if this run+platform combination was already processed
+              already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml" "$PLAT")
+              if [ "$already_processed" = "true" ]; then
+                echo "  Skipping orchestrai-bump for run $run_id (${PLAT}) - already processed"
+                continue
+              fi
 
-            # Trigger the workflow using the GitHub API
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-bump.yml/dispatches" \
-              -d "{
-                \"ref\": \"${{ github.ref_name }}\",
-                \"inputs\": {
-                  \"run_id\": \"${run_id}\",
-                  \"run_url\": \"${run_url}\",
-                  \"run_title\": \"${run_title}\",
-                  \"run_conclusion\": \"${run_conclusion}\",
-                  \"platform\": \"${BUMP_PLATFORM}\"
-                }
-              }")
+              echo "  Triggering orchestrai-bump for run $run_id (${PLAT})..."
 
-            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-            BODY=$(echo "$RESPONSE" | head -n -1)
+              # Trigger the workflow using the GitHub API
+              RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-bump.yml/dispatches" \
+                -d "{
+                  \"ref\": \"${{ github.ref_name }}\",
+                  \"inputs\": {
+                    \"run_id\": \"${run_id}\",
+                    \"run_url\": \"${run_url}\",
+                    \"run_title\": \"${run_title}\",
+                    \"run_conclusion\": \"${run_conclusion}\",
+                    \"platform\": \"${PLAT}\"
+                  }
+                }")
 
-            if [ "$HTTP_CODE" = "204" ]; then
-              echo "    ✅ Triggered successfully"
-              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$BUMP_PLATFORM\", \"status\": \"triggered\"}]")
-            else
-              echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
-              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$BUMP_PLATFORM\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
-            fi
+              HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+              BODY=$(echo "$RESPONSE" | head -n -1)
+
+              if [ "$HTTP_CODE" = "204" ]; then
+                echo "    ✅ Triggered successfully"
+                TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$PLAT\", \"status\": \"triggered\"}]")
+              else
+                echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
+                TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$PLAT\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+              fi
+            done
           done
 
           # =====================
@@ -269,13 +295,6 @@ jobs:
           # =====================
           echo "Triggering nightly workflows..."
           NIGHTLY_COUNT=$(echo "$NIGHTLY_RUNS" | jq 'length')
-
-          # For nightly builds, trigger both platforms unless a specific one is selected
-          if [ -z "${PLATFORM}" ]; then
-            PLATFORMS_TO_TRIGGER="linux windows"
-          else
-            PLATFORMS_TO_TRIGGER="${PLATFORM}"
-          fi
 
           for i in $(seq 0 $((NIGHTLY_COUNT - 1))); do
             run=$(echo "$NIGHTLY_RUNS" | jq ".[$i]")
