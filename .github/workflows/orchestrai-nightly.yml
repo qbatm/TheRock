@@ -1,0 +1,82 @@
+name: OrchestrAI - Nightly Build
+
+# This workflow is triggered by poll-therock-orchestrai.yml when a new nightly build
+# is discovered from ROCm/TheRock. It uses the reusable-trigger-orchestrai.yml
+# workflow to trigger and poll Jenkins jobs.
+#
+# For nightly builds, we use S3 URL lookup (no run_id) and pass the SDK URL
+# to Jenkins for installation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'GitHub Actions workflow run ID from ROCm/TheRock (for reference only)'
+        required: true
+        type: string
+      run_url:
+        description: 'URL to the GitHub Actions workflow run'
+        required: false
+        type: string
+        default: ''
+      run_title:
+        description: 'Title/description of the workflow run'
+        required: false
+        type: string
+        default: ''
+      run_conclusion:
+        description: 'Conclusion of the workflow run (success/failure)'
+        required: false
+        type: string
+        default: ''
+      head_sha:
+        description: 'Git commit SHA of the nightly build'
+        required: false
+        type: string
+        default: ''
+      platform:
+        description: 'Platform to trigger (linux or windows)'
+        required: false
+        type: choice
+        options:
+          - linux
+          - windows
+        default: linux
+
+jobs:
+  trigger-orchestrai:
+    name: Trigger OrchestrAI for Nightly Build
+    uses: ./.github/workflows/reusable-trigger-orchestrai.yml
+    with:
+      platform: ${{ inputs.platform }}
+      # For nightly builds, we don't pass run_id - the reusable workflow
+      # will use S3 lookup to find the SDK URL
+    secrets:
+      UCICD_USER: ${{ secrets.UCICD_USER }}
+      UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+
+  summary:
+    name: Nightly Build Summary
+    needs: trigger-orchestrai
+    if: always()
+    runs-on: arc-lnx-pub
+    steps:
+      - name: Write Nightly Build Summary
+        run: |
+          echo "## OrchestrAI - Nightly Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run ID:** ${{ inputs.run_id }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.run_url }}" ]; then
+            echo "**TheRock Run:** [${{ inputs.run_id }}](${{ inputs.run_url }})" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.run_title }}" ]; then
+            echo "**Title:** ${{ inputs.run_title }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.run_conclusion }}" ]; then
+            echo "**TheRock Conclusion:** ${{ inputs.run_conclusion }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "${{ inputs.head_sha }}" ]; then
+            echo "**Commit:** ${{ inputs.head_sha }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**OrchestrAI Result:** ${{ needs.trigger-orchestrai.result }}" >> $GITHUB_STEP_SUMMARY

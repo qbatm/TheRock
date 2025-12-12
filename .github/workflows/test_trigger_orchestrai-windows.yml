@@ -16,6 +16,14 @@ on:
         description: 'Simulate Windows build failure'
         type: boolean
         default: false
+      sdk_url_override:
+        description: 'Override SDK URL (skips S3 lookup)'
+        type: string
+        default: ''
+      pool_type:
+        description: 'Jenkins agent pool type'
+        type: string
+        default: 'ucicd_production_hot_machines'
 
 permissions:
   contents: read
@@ -56,12 +64,12 @@ jobs:
           echo "Building torch wheel for Windows..."
           echo "Target: gfx110X-dgpu"
           sleep 2
-          
+
           if [[ "${{ inputs.simulate_windows_failure }}" == "true" ]]; then
             echo "❌ Simulated Windows build failure"
             exit 1
           fi
-          
+
           echo "✅ Windows PyTorch wheels built successfully"
 
       - name: Mock Windows Tests
@@ -81,83 +89,19 @@ jobs:
           echo "❌ Simulating a general pipeline failure"
           exit 1
 
-  ci_summary:
-    name: CI Summary with Email Notification
+  trigger-orchestrai:
+    name: Trigger OrchestrAI
     if: always()
     needs:
       - setup
       - mock_windows_build_and_test
       - mock_general_failure
-    runs-on: ubuntu-24.04
-    environment: email_creds
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.12'
-
-      - name: Analyze mock pipeline results
-        run: |
-          echo "📊 Analyzing mock TheRock pipeline results..."
-          echo '${{ toJson(needs) }}'
-          
-          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
-            | jq --raw-output \
-            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
-          )"
-          
-          echo "Failed jobs detected: '$FAILED_JOBS'"
-          
-          # Set pipeline status and details
-          if [[ "${FAILED_JOBS}" != "" ]]; then
-            echo "PIPELINE_STATUS=failure" >> "$GITHUB_ENV"
-            echo "FAILED_JOBS=${FAILED_JOBS}" >> "$GITHUB_ENV"
-            echo "PIPELINE_DETAILS=Mock pipeline test - The following jobs failed: ${FAILED_JOBS}" >> "$GITHUB_ENV"
-            echo "❌ Mock pipeline failed. Jobs that failed: ${FAILED_JOBS}"
-          else
-            echo "PIPELINE_STATUS=success" >> "$GITHUB_ENV"
-            echo "FAILED_JOBS=" >> "$GITHUB_ENV"
-            echo "PIPELINE_DETAILS=Mock pipeline test - All ROCm libraries and PyTorch wheels built and tested successfully!" >> "$GITHUB_ENV"
-            echo "✅ Mock pipeline completed successfully!"
-          fi
-
-      - name: Send mock pipeline completion email
-        if: always()
-        env:
-          RECIPIENT_EMAIL: \"${{secrets.RECEIVER_EMAIL}}\"
-        run: |
-          echo "📧 Sending mock pipeline completion email..."
-         
-          # Build the command with conditional parameters
-          CMD="python .github/sent_email.py --sender-email-pass \"${{secrets.SENDER_EMAIL_PASS}}\" --sender-email \"${{secrets.SENDER_EMAIL}}\" --receiver \"${{secrets.RECEIVER_EMAIL}}\" --status \"$PIPELINE_STATUS\" --workflow-url \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" --details \"$PIPELINE_DETAILS\" --platform Windows --commit-id \"${{ github.event.pull_request.head.sha }}\""
-          
-          # Add failed-jobs only if there are any
-          if [[ -n "$FAILED_JOBS" ]]; then
-            CMD="$CMD --failed-jobs \"$FAILED_JOBS\""
-          fi
-          
-          echo "Executing: $CMD"
-          
-          # Execute the command
-          eval $CMD
-          
-          echo "✅ Email notification sent!"
-
-      - name: Display test summary
-        if: always()
-        run: |
-          echo "🎭 Mock TheRock Pipeline Test Summary"
-          echo "======================================"
-          echo "Pipeline Status: $PIPELINE_STATUS"
-          echo "Failed Jobs: $FAILED_JOBS"
-          echo "Workflow URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo ""
-          echo "📧 Email notification has been sent to email."
-          echo ""
-          echo "This was a test run of the email notification system."
-          echo "The actual TheRock pipeline will work the same way when it completes."
-
+    uses: ./.github/workflows/reusable-trigger-orchestrai.yml
+    with:
+      platform: windows
+      sdk_url_override: ${{ inputs.sdk_url_override }}
+      pool_type: ${{ inputs.pool_type }}
+    secrets:
+      UCICD_USER: ${{ secrets.UCICD_USER }}
+      UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
 

@@ -1,0 +1,370 @@
+name: Poll TheRock for OrchestrAI
+
+# This workflow polls the ROCm/TheRock repository for:
+# 1. Bump PRs - dependabot PRs with title starting with "Bump"
+# 2. Nightly builds - scheduled CI nightly runs
+#
+# For each discovered run, it triggers a downstream workflow:
+# - orchestrai-bump.yml for bump PRs
+# - orchestrai-nightly.yml for nightly builds
+#
+# State tracking is done via workflow run naming to avoid maintaining a database.
+
+on:
+  schedule:
+    # Run every 30 minutes
+    - cron: '*/30 * * * *'
+
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: 'Hours to look back for runs'
+        required: false
+        type: number
+        default: 1
+      dry_run:
+        description: 'Dry run mode (do not trigger downstream workflows)'
+        required: false
+        type: boolean
+        default: false
+      platform:
+        description: 'Platform filter (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - linux
+          - windows
+
+  pull_request:
+    paths:
+      - '.github/workflows/poll-therock-orchestrai.yml'
+      - '.github/workflows/orchestrai-bump.yml'
+      - '.github/workflows/orchestrai-nightly.yml'
+      - '.github/workflows/reusable-trigger-orchestrai.yml'
+      - 'build_tools/trigger_orchestrai.py'
+
+env:
+  THEROCK_REPO: "ROCm/TheRock"
+  # Workflow IDs for the CI workflows we want to poll
+  CI_WORKFLOW: "ci.yml"
+  CI_NIGHTLY_WORKFLOW: "ci_nightly.yml"
+  # Lookback period in hours (default 8 hours for scheduled runs)
+  DEFAULT_LOOKBACK_HOURS: 8
+
+jobs:
+  # Job to discover new runs from TheRock repo and trigger downstream workflows
+  discover-and-trigger:
+    name: Discover and Trigger
+    runs-on: arc-lnx-pub
+    outputs:
+      bump_count: ${{ steps.discover.outputs.bump_count }}
+      nightly_count: ${{ steps.discover.outputs.nightly_count }}
+      triggered_bump: ${{ steps.trigger.outputs.triggered_bump }}
+      triggered_nightly: ${{ steps.trigger.outputs.triggered_nightly }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Discover new runs
+        id: discover
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          LOOKBACK_HOURS="${{ inputs.lookback_hours || env.DEFAULT_LOOKBACK_HOURS }}"
+          echo "Looking back ${LOOKBACK_HOURS} hour(s) for new runs..."
+
+          # Calculate cutoff time (ISO 8601 format)
+          CUTOFF_TIME=$(date -u -d "${LOOKBACK_HOURS} hours ago" +"%Y-%m-%dT%H:%M:%SZ")
+          echo "Cutoff time: ${CUTOFF_TIME}"
+
+          # GitHub API base URL
+          GITHUB_API="https://api.github.com"
+
+          # Function to check if we've already processed a run
+          check_already_processed() {
+            local run_id=$1
+            local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
+
+            # Query our own repo for existing workflow runs triggered with this run_id
+            # We search in the workflow run names which include the run_id
+            local existing=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100" \
+              | jq -r --arg run_id "$run_id" '.workflow_runs[]? | select(.name | contains($run_id)) | .id' 2>/dev/null | head -1 || echo "")
+
+            if [ -n "$existing" ]; then
+              echo "true"
+            else
+              echo "false"
+            fi
+          }
+
+          # =====================
+          # Discover Bump PRs
+          # =====================
+          echo "Discovering bump PRs from ${{ env.THEROCK_REPO }}..."
+
+          # Query CI workflow runs for bump PRs using curl
+          BUMP_RUNS=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&actor=dependabot%5Bbot%5D" \
+            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
+              (.conclusion == "success" or .conclusion == "failure") and
+              .event == "pull_request" and
+              (.display_title | startswith("Bump")) and
+              (.created_at >= $cutoff)
+            ) | {
+              id: .id,
+              run_number: .run_number,
+              display_title: .display_title,
+              conclusion: .conclusion,
+              head_sha: .head_sha,
+              head_branch: .head_branch,
+              created_at: .created_at,
+              html_url: .html_url
+            }]' 2>/dev/null || echo "[]")
+
+          echo "Found $(echo "$BUMP_RUNS" | jq 'length') bump PR runs"
+
+          # Filter out already processed runs
+          FILTERED_BUMP_RUNS="[]"
+          for run_id in $(echo "$BUMP_RUNS" | jq -r '.[]?.id // empty'); do
+            already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml")
+            if [ "$already_processed" = "false" ]; then
+              run_json=$(echo "$BUMP_RUNS" | jq ".[] | select(.id == $run_id)")
+              FILTERED_BUMP_RUNS=$(echo "$FILTERED_BUMP_RUNS" | jq ". + [$run_json]")
+              echo "  New bump PR run: $run_id"
+            else
+              echo "  Already processed: $run_id"
+            fi
+          done
+
+          echo "Filtered bump runs: $(echo "$FILTERED_BUMP_RUNS" | jq 'length')"
+
+          # =====================
+          # Discover Nightly Builds
+          # =====================
+          echo "Discovering nightly builds from ${{ env.THEROCK_REPO }}..."
+
+          # Query CI nightly workflow runs using curl
+          NIGHTLY_RUNS=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&branch=main" \
+            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
+              (.conclusion == "success" or .conclusion == "failure") and
+              .event == "schedule" and
+              (.created_at >= $cutoff)
+            ) | {
+              id: .id,
+              run_number: .run_number,
+              display_title: .display_title,
+              conclusion: .conclusion,
+              head_sha: .head_sha,
+              head_branch: .head_branch,
+              created_at: .created_at,
+              html_url: .html_url
+            }]' 2>/dev/null || echo "[]")
+
+          echo "Found $(echo "$NIGHTLY_RUNS" | jq 'length') nightly runs"
+
+          # Filter out already processed runs
+          FILTERED_NIGHTLY_RUNS="[]"
+          for run_id in $(echo "$NIGHTLY_RUNS" | jq -r '.[]?.id // empty'); do
+            already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml")
+            if [ "$already_processed" = "false" ]; then
+              run_json=$(echo "$NIGHTLY_RUNS" | jq ".[] | select(.id == $run_id)")
+              FILTERED_NIGHTLY_RUNS=$(echo "$FILTERED_NIGHTLY_RUNS" | jq ". + [$run_json]")
+              echo "  New nightly run: $run_id"
+            else
+              echo "  Already processed: $run_id"
+            fi
+          done
+
+          echo "Filtered nightly runs: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
+
+          # Output results as base64 to avoid JSON escaping issues
+          echo "bump_runs_b64=$(echo "$FILTERED_BUMP_RUNS" | base64 -w0)" >> $GITHUB_OUTPUT
+          echo "nightly_runs_b64=$(echo "$FILTERED_NIGHTLY_RUNS" | base64 -w0)" >> $GITHUB_OUTPUT
+          echo "bump_count=$(echo "$FILTERED_BUMP_RUNS" | jq 'length')" >> $GITHUB_OUTPUT
+          echo "nightly_count=$(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')" >> $GITHUB_OUTPUT
+
+          # Summary
+          echo ""
+          echo "======================================"
+          echo "Discovery Summary"
+          echo "======================================"
+          echo "Bump PRs to process: $(echo "$FILTERED_BUMP_RUNS" | jq 'length')"
+          echo "Nightly builds to process: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
+
+      - name: Trigger downstream workflows
+        id: trigger
+        if: inputs.dry_run != true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          GITHUB_API="https://api.github.com"
+          PLATFORM="${{ inputs.platform || 'linux' }}"
+
+          # Decode the base64 encoded JSON
+          BUMP_RUNS=$(echo "${{ steps.discover.outputs.bump_runs_b64 }}" | base64 -d)
+          NIGHTLY_RUNS=$(echo "${{ steps.discover.outputs.nightly_runs_b64 }}" | base64 -d)
+
+          TRIGGERED_BUMP="[]"
+          TRIGGERED_NIGHTLY="[]"
+
+          # =====================
+          # Trigger Bump PR workflows
+          # =====================
+          echo "Triggering bump PR workflows..."
+          BUMP_COUNT=$(echo "$BUMP_RUNS" | jq 'length')
+
+          for i in $(seq 0 $((BUMP_COUNT - 1))); do
+            run=$(echo "$BUMP_RUNS" | jq ".[$i]")
+            run_id=$(echo "$run" | jq -r '.id')
+            run_url=$(echo "$run" | jq -r '.html_url')
+            run_title=$(echo "$run" | jq -r '.display_title')
+            run_conclusion=$(echo "$run" | jq -r '.conclusion')
+
+            echo "  Triggering orchestrai-bump for run $run_id..."
+
+            # Trigger the workflow using the GitHub API
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-bump.yml/dispatches" \
+              -d "{
+                \"ref\": \"${{ github.ref_name }}\",
+                \"inputs\": {
+                  \"run_id\": \"${run_id}\",
+                  \"run_url\": \"${run_url}\",
+                  \"run_title\": \"${run_title}\",
+                  \"run_conclusion\": \"${run_conclusion}\",
+                  \"platform\": \"${PLATFORM}\"
+                }
+              }")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+
+            if [ "$HTTP_CODE" = "204" ]; then
+              echo "    ✅ Triggered successfully"
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"triggered\"}]")
+            else
+              echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+            fi
+          done
+
+          # =====================
+          # Trigger Nightly workflows
+          # =====================
+          echo "Triggering nightly workflows..."
+          NIGHTLY_COUNT=$(echo "$NIGHTLY_RUNS" | jq 'length')
+
+          for i in $(seq 0 $((NIGHTLY_COUNT - 1))); do
+            run=$(echo "$NIGHTLY_RUNS" | jq ".[$i]")
+            run_id=$(echo "$run" | jq -r '.id')
+            run_url=$(echo "$run" | jq -r '.html_url')
+            run_title=$(echo "$run" | jq -r '.display_title')
+            run_conclusion=$(echo "$run" | jq -r '.conclusion')
+            head_sha=$(echo "$run" | jq -r '.head_sha')
+
+            echo "  Triggering orchestrai-nightly for run $run_id..."
+
+            # Trigger the workflow using the GitHub API
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-nightly.yml/dispatches" \
+              -d "{
+                \"ref\": \"${{ github.ref_name }}\",
+                \"inputs\": {
+                  \"run_id\": \"${run_id}\",
+                  \"run_url\": \"${run_url}\",
+                  \"run_title\": \"${run_title}\",
+                  \"run_conclusion\": \"${run_conclusion}\",
+                  \"head_sha\": \"${head_sha}\",
+                  \"platform\": \"${PLATFORM}\"
+                }
+              }")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+
+            if [ "$HTTP_CODE" = "204" ]; then
+              echo "    ✅ Triggered successfully"
+              TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"triggered\"}]")
+            else
+              echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
+              TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+            fi
+          done
+
+          echo "triggered_bump=$(echo "$TRIGGERED_BUMP" | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "triggered_nightly=$(echo "$TRIGGERED_NIGHTLY" | jq -c '.')" >> $GITHUB_OUTPUT
+
+      - name: Write Summary
+        run: |
+          echo "## TheRock OrchestrAI Polling Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**Lookback:** ${{ inputs.lookback_hours || env.DEFAULT_LOOKBACK_HOURS }} hours" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry Run:** ${{ inputs.dry_run || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Decode the base64 encoded JSON
+          BUMP_RUNS=$(echo "${{ steps.discover.outputs.bump_runs_b64 }}" | base64 -d)
+          NIGHTLY_RUNS=$(echo "${{ steps.discover.outputs.nightly_runs_b64 }}" | base64 -d)
+
+          echo "### Discovered Runs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "#### Bump PRs (${{ steps.discover.outputs.bump_count }})" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.discover.outputs.bump_count }}" -gt 0 ]; then
+            echo "| Run ID | Title | Conclusion | Created |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|------------|---------|" >> $GITHUB_STEP_SUMMARY
+            echo "$BUMP_RUNS" | jq -r '.[] | "| [\(.id)](\(.html_url)) | \(.display_title) | \(.conclusion) | \(.created_at) |"' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No new bump PRs found_" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Nightly Builds (${{ steps.discover.outputs.nightly_count }})" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.discover.outputs.nightly_count }}" -gt 0 ]; then
+            echo "| Run ID | Title | Conclusion | Created |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|------------|---------|" >> $GITHUB_STEP_SUMMARY
+            echo "$NIGHTLY_RUNS" | jq -r '.[] | "| [\(.id)](\(.html_url)) | \(.display_title) | \(.conclusion) | \(.created_at) |"' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No new nightly builds found_" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Triggered Workflows" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            TRIGGERED_BUMP='${{ steps.trigger.outputs.triggered_bump }}'
+            TRIGGERED_NIGHTLY='${{ steps.trigger.outputs.triggered_nightly }}'
+
+            if [ -n "$TRIGGERED_BUMP" ] && [ "$TRIGGERED_BUMP" != "[]" ]; then
+              echo "#### Bump PR Workflows" >> $GITHUB_STEP_SUMMARY
+              echo "| Run ID | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$TRIGGERED_BUMP" | jq -r '.[] | "| \(.run_id) | \(.status) |"' >> $GITHUB_STEP_SUMMARY
+            fi
+
+            if [ -n "$TRIGGERED_NIGHTLY" ] && [ "$TRIGGERED_NIGHTLY" != "[]" ]; then
+              echo "#### Nightly Workflows" >> $GITHUB_STEP_SUMMARY
+              echo "| Run ID | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$TRIGGERED_NIGHTLY" | jq -r '.[] | "| \(.run_id) | \(.status) |"' >> $GITHUB_STEP_SUMMARY
+            fi
+          fi

@@ -1,0 +1,515 @@
+name: Reusable OrchestrAI Trigger
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: 'Platform to trigger (linux or windows)'
+        required: true
+        type: string
+      sdk_url_override:
+        description: 'Override SDK URL (skips S3 lookup, for nightly builds)'
+        required: false
+        type: string
+        default: ''
+      run_id:
+        description: 'GitHub Actions workflow run ID (for bump PRs, uses install_rocm_from_artifacts.py)'
+        required: false
+        type: string
+        default: ''
+      pool_type:
+        description: 'Jenkins agent pool type'
+        required: false
+        type: string
+        default: 'ucicd_production_hot_machines'
+      polling_interval:
+        description: 'Polling interval in seconds'
+        required: false
+        type: number
+        default: 300 # Every 5 minutes
+      timeout_minutes:
+        description: 'Timeout in minutes'
+        required: false
+        type: number
+        default: 240 # 4 hour timeout
+      skip_individual_summaries:
+        description: 'Skip writing individual job summaries (only write consolidated summary)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      UCICD_USER:
+        required: true
+      UCICD_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to trigger (linux or windows)'
+        required: true
+        type: choice
+        options:
+          - linux
+          - windows
+      sdk_url_override:
+        description: 'Override SDK URL (skips S3 lookup, for nightly builds)'
+        required: false
+        type: string
+        default: ''
+      run_id:
+        description: 'GitHub Actions workflow run ID (for bump PRs, uses install_rocm_from_artifacts.py)'
+        required: false
+        type: string
+        default: ''
+      pool_type:
+        description: 'Jenkins agent pool type'
+        required: false
+        type: string
+        default: 'ucicd_production_hot_machines'
+      polling_interval:
+        description: 'Polling interval in seconds'
+        required: false
+        type: number
+        default: 300 # Every 5 minutes
+      timeout_minutes:
+        description: 'Timeout in minutes'
+        required: false
+        type: number
+        default: 240 # 4 hour timeout
+      skip_individual_summaries:
+        description: 'Skip writing individual job summaries (only write consolidated summary)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  JENKINS_URL: "https://ucicd-jenkins.amd.com"
+  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
+
+jobs:
+  # Preprocessing job to generate the matrix of GPU targets
+  preprocess:
+    name: Generate GPU Matrix
+    runs-on: arc-lnx-pub
+    outputs:
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
+      trigger_count: ${{ steps.generate_matrix.outputs.trigger_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Generate trigger configurations
+        id: generate_matrix
+        run: |
+          echo "Generating OrchestrAI trigger configurations for ${{ inputs.platform }}..."
+
+          # Build the command with optional parameters
+          CMD="python build_tools/trigger_orchestrai.py --mode generate --platform ${{ inputs.platform }} --commit-id ${{ github.sha }}"
+
+          # Add SDK URL override if provided (for nightly builds)
+          if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
+            CMD="$CMD --sdk-url \"${{ inputs.sdk_url_override }}\""
+          fi
+
+          # Add run_id if provided (for bump PRs)
+          if [[ -n "${{ inputs.run_id }}" ]]; then
+            CMD="$CMD --run-id \"${{ inputs.run_id }}\""
+          fi
+
+          # Add pool type if provided
+          if [[ -n "${{ inputs.pool_type }}" ]]; then
+            CMD="$CMD --pool-type \"${{ inputs.pool_type }}\""
+          fi
+
+          # Add GitHub output file
+          CMD="$CMD --github-output $GITHUB_OUTPUT"
+
+          echo "Running: $CMD"
+          eval $CMD
+
+          # Read the trigger configs and transform to matrix format
+          TRIGGER_CONFIGS=$(grep -oP 'trigger_configs=\K.*' $GITHUB_OUTPUT || echo "[]")
+
+          # Create matrix JSON with include array
+          MATRIX=$(echo "$TRIGGER_CONFIGS" | jq -c '{include: .}')
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+          echo "✅ Matrix generated with $(echo "$TRIGGER_CONFIGS" | jq 'length') configurations"
+
+  # Matrix job that triggers each GPU target in parallel
+  trigger-orchestrai:
+    name: Trigger OrchestrAI (${{ matrix.gpu_tag }})
+    needs: preprocess
+    runs-on: arc-lnx-pub
+    environment: ucicd
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.preprocess.outputs.matrix) }}
+    outputs:
+      # Note: Matrix jobs can't directly output arrays, so we upload results as artifacts
+      result: ${{ steps.poll.outputs.result }}
+    steps:
+      - name: Trigger OrchestrAI
+        id: trigger
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_USER }}
+        run: |
+          echo "Triggering OrchestrAI for GPU: ${{ matrix.gpu_tag }} on ${{ matrix.platform }}"
+
+          BUILDS_JSON='${{ matrix.builds_json }}'
+          echo "BUILDS_JSON: ${BUILDS_JSON}"
+
+          # Extract SDK URL and run_id for later use in summary
+          SDK_URL='${{ matrix.sdk_url }}'
+          RUN_ID='${{ matrix.run_id }}'
+          echo "sdk_url=${SDK_URL}" >> $GITHUB_OUTPUT
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+
+          # URL-encode the parameters using jq
+          ENCODED_BUILDS_JSON=$(jq -rn --arg str "${BUILDS_JSON}" '$str|@uri')
+
+          # Trigger the parameterized job using the remote trigger token
+          # This bypasses CSRF protection and is the same method the old workflow used
+          RESPONSE=$(curl -s -i -X POST \
+            --user "${UCICD_USER}:${UCICD_TOKEN}" \
+            "${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/buildWithParameters?token=${JENKINS_TRIGGER_TOKEN}&BUILDS_JSON=${ENCODED_BUILDS_JSON}")
+
+          # Extract the queue URL from Location header
+          QUEUE_URL=$(echo "$RESPONSE" | grep -i "^Location:" | awk '{print $2}' | tr -d '\r')
+
+          if [ -z "$QUEUE_URL" ]; then
+            echo "::error::Failed to trigger OrchestrAI for ${{ matrix.gpu_tag }}"
+            echo "Response:"
+            echo "$RESPONSE" | head -30
+            exit 1
+          fi
+
+          echo "Queue URL: $QUEUE_URL"
+          echo "queue_url=${QUEUE_URL}" >> $GITHUB_OUTPUT
+
+      - name: Wait for Build Number
+        id: get_build_number
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+        run: |
+          QUEUE_URL="${{ steps.trigger.outputs.queue_url }}"
+
+          echo "Waiting for OrchestrAI build (${{ matrix.gpu_tag }}) to be assigned..."
+
+          # Poll the queue until we get a build number (max 5 minutes)
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          BUILD_NUMBER=""
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            QUEUE_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+              "${QUEUE_URL}api/json")
+
+            # Check if build has started (executable field will be populated) using jq
+            BUILD_NUMBER=$(echo "$QUEUE_INFO" | jq -r '.executable.number // empty')
+
+            if [ -n "$BUILD_NUMBER" ]; then
+              echo "Build number: $BUILD_NUMBER"
+              break
+            fi
+
+            # Check if cancelled using jq
+            CANCELLED=$(echo "$QUEUE_INFO" | jq -r '.cancelled // false')
+
+            if [ "$CANCELLED" = "true" ]; then
+              echo "::error::OrchestrAI build (${{ matrix.gpu_tag }}) was cancelled in queue"
+              exit 1
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Waiting for build to start (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+            sleep 5
+          done
+
+          if [ -z "$BUILD_NUMBER" ]; then
+            echo "::error::Timed out waiting for OrchestrAI build number (${{ matrix.gpu_tag }})"
+            exit 1
+          fi
+
+          echo "build_number=${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Poll OrchestrAI for Completion
+        id: poll
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          echo "Polling OrchestrAI build: ${BUILD_NUMBER} (${{ matrix.gpu_tag }})"
+
+          POLLING_INTERVAL=${{ inputs.polling_interval }}
+          TIMEOUT_SECONDS=$(( ${{ inputs.timeout_minutes }} * 60 ))
+          START_TIME=$(date +%s)
+
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+
+            if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
+              echo "::error::Timeout waiting for OrchestrAI (${{ matrix.gpu_tag }}) to complete"
+              exit 1
+            fi
+
+            BUILD_INFO=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+              "${BUILD_URL}/api/json")
+
+            # Check if build is still running using jq
+            BUILDING=$(echo "$BUILD_INFO" | jq -r 'if .building == false then "false" else "true" end')
+
+            if [ "$BUILDING" = "false" ]; then
+              echo "OrchestrAI build completed!"
+
+              # Extract result using jq
+              RESULT=$(echo "$BUILD_INFO" | jq -r '.result // "UNKNOWN"')
+
+              # Extract duration and convert to seconds using jq
+              DURATION_MS=$(echo "$BUILD_INFO" | jq -r '.duration // 0')
+              DURATION_SEC=$((DURATION_MS / 1000))
+
+              echo "result=${RESULT}" >> $GITHUB_OUTPUT
+              echo "duration=${DURATION_SEC}s" >> $GITHUB_OUTPUT
+              break
+            fi
+
+            echo "Build still running (${{ matrix.gpu_tag }})... (elapsed: ${ELAPSED}s)"
+            sleep $POLLING_INTERVAL
+          done
+
+      - name: Fetch Test Results
+        id: test_results
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          echo "Fetching test results from OrchestrAI build ${BUILD_NUMBER}..."
+
+          # Try to fetch the test results JSON artifact from Jenkins workspace
+          # The file is written as ucicd_test_results.json by the pipeline
+          TEST_RESULTS=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+            "${BUILD_URL}/artifact/ucicd_test_results.json" 2>/dev/null || echo "")
+
+          if [ -n "$TEST_RESULTS" ] && echo "$TEST_RESULTS" | jq -e '.summary' > /dev/null 2>&1; then
+            echo "✅ Test results fetched successfully"
+
+            # Extract test summary fields
+            PLATFORM=$(echo "$TEST_RESULTS" | jq -r '.summary.environment.THEROCK_PLATFORM // "N/A"')
+            GPU_ARCH=$(echo "$TEST_RESULTS" | jq -r '.summary.environment.THEROCK_GPU_ARCH_PATTERN // "N/A"')
+            TOTAL_TESTS=$(echo "$TEST_RESULTS" | jq -r '.summary.total_tests // "N/A"')
+            PASSED=$(echo "$TEST_RESULTS" | jq -r '.summary.passed // "N/A"')
+            FAILED=$(echo "$TEST_RESULTS" | jq -r '.summary.failed // "N/A"')
+            SKIPPED=$(echo "$TEST_RESULTS" | jq -r '.summary.skipped // "N/A"')
+            ERROR=$(echo "$TEST_RESULTS" | jq -r '.summary.error // "N/A"')
+            UNKNOWN=$(echo "$TEST_RESULTS" | jq -r '.summary.unknown // "N/A"')
+
+            # Output for use in summary step
+            echo "has_results=true" >> $GITHUB_OUTPUT
+            echo "platform=${PLATFORM}" >> $GITHUB_OUTPUT
+            echo "gpu_arch=${GPU_ARCH}" >> $GITHUB_OUTPUT
+            echo "total_tests=${TOTAL_TESTS}" >> $GITHUB_OUTPUT
+            echo "passed=${PASSED}" >> $GITHUB_OUTPUT
+            echo "failed=${FAILED}" >> $GITHUB_OUTPUT
+            echo "skipped=${SKIPPED}" >> $GITHUB_OUTPUT
+            echo "error=${ERROR}" >> $GITHUB_OUTPUT
+            echo "unknown=${UNKNOWN}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Test results not available or invalid format"
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Save Results for Consolidated Summary
+        id: save_results
+        run: |
+          # Create a JSON file with this job's results for the consolidated summary
+          mkdir -p results
+          cat > results/${{ matrix.gpu_tag }}.json << 'EOF'
+          {
+            "gpu_tag": "${{ matrix.gpu_tag }}",
+            "platform": "${{ matrix.platform }}",
+            "sdk_url": "${{ steps.trigger.outputs.sdk_url }}",
+            "run_id": "${{ steps.trigger.outputs.run_id }}",
+            "build_number": "${{ steps.get_build_number.outputs.build_number }}",
+            "result": "${{ steps.poll.outputs.result }}",
+            "duration": "${{ steps.poll.outputs.duration }}",
+            "has_results": "${{ steps.test_results.outputs.has_results }}",
+            "test_platform": "${{ steps.test_results.outputs.platform }}",
+            "test_gpu_arch": "${{ steps.test_results.outputs.gpu_arch }}",
+            "total_tests": "${{ steps.test_results.outputs.total_tests }}",
+            "passed": "${{ steps.test_results.outputs.passed }}",
+            "failed": "${{ steps.test_results.outputs.failed }}",
+            "skipped": "${{ steps.test_results.outputs.skipped }}",
+            "error": "${{ steps.test_results.outputs.error }}",
+            "unknown": "${{ steps.test_results.outputs.unknown }}"
+          }
+          EOF
+          echo "Saved results for ${{ matrix.gpu_tag }}"
+
+      - name: Upload Results Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: orchestrai-results-${{ matrix.gpu_tag }}
+          path: results/${{ matrix.gpu_tag }}.json
+          retention-days: 1
+
+      - name: Write Job Summary
+        if: ${{ inputs.skip_individual_summaries != true }}
+        run: |
+          RESULT="${{ steps.poll.outputs.result }}"
+          SDK_URL="${{ steps.trigger.outputs.sdk_url }}"
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
+          GPU_TAG="${{ matrix.gpu_tag }}"
+          PLATFORM="${{ matrix.platform }}"
+
+          # Write summary with GPU target context
+          echo "### OrchestrAI Test Results - ${GPU_TAG} (${PLATFORM})" >> $GITHUB_STEP_SUMMARY
+
+          # Add test results table if available
+          if [ "${{ steps.test_results.outputs.has_results }}" = "true" ]; then
+            echo "| Platform | GPU Arch | Total Tests | Passed | Failed | Skipped | Error | Unknown |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|----------|-------------|--------|--------|---------|-------|---------|" >> $GITHUB_STEP_SUMMARY
+            echo "| ${{ steps.test_results.outputs.platform }} | ${{ steps.test_results.outputs.gpu_arch }} | ${{ steps.test_results.outputs.total_tests }} | ${{ steps.test_results.outputs.passed }} | ${{ steps.test_results.outputs.failed }} | ${{ steps.test_results.outputs.skipped }} | ${{ steps.test_results.outputs.error }} | ${{ steps.test_results.outputs.unknown }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "_Test results not available_" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Add source info (SDK URL or Run ID)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$RUN_ID" ]; then
+            echo "**TheRock Run ID:** [${RUN_ID}](https://github.com/ROCm/TheRock/actions/runs/${RUN_ID})" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -n "$SDK_URL" ]; then
+            echo "**SDK URL:** ${SDK_URL}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check Result
+        run: |
+          RESULT="${{ steps.poll.outputs.result }}"
+          GPU_TAG="${{ matrix.gpu_tag }}"
+
+          # Fail the workflow if OrchestrAI job failed
+          if [ "$RESULT" != "SUCCESS" ]; then
+            echo "::error::OrchestrAI (${GPU_TAG}) finished with result: ${RESULT}"
+            exit 1
+          fi
+
+  # Consolidated summary job that combines all matrix results
+  consolidated-summary:
+    name: Consolidated Summary
+    needs: [preprocess, trigger-orchestrai]
+    if: always()
+    runs-on: arc-lnx-pub
+    steps:
+      - name: Download All Results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: orchestrai-results-*
+          path: results
+          merge-multiple: true
+
+      - name: Generate Consolidated Summary
+        run: |
+          echo "### OrchestrAI Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check if we have any results
+          if [ ! -d results ] || [ -z "$(ls -A results 2>/dev/null)" ]; then
+            echo "_No test results available_" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Create the table header
+          echo "| GPU Target | Platform | Result | Total Tests | Passed | Failed | Skipped | Error | Unknown |" >> $GITHUB_STEP_SUMMARY
+          echo "|------------|----------|--------|-------------|--------|--------|---------|-------|---------|" >> $GITHUB_STEP_SUMMARY
+
+          # Track overall status
+          ANY_FAILED=false
+          SDK_URLS=""
+          RUN_IDS=""
+
+          # Process each result file
+          for result_file in results/*.json; do
+            if [ -f "$result_file" ]; then
+              GPU_TAG=$(jq -r '.gpu_tag // "N/A"' "$result_file")
+              PLATFORM=$(jq -r '.platform // "N/A"' "$result_file")
+              RESULT=$(jq -r '.result // "UNKNOWN"' "$result_file")
+              SDK_URL=$(jq -r '.sdk_url // ""' "$result_file")
+              RUN_ID=$(jq -r '.run_id // ""' "$result_file")
+              HAS_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
+
+              # Format result with emoji
+              if [ "$RESULT" = "SUCCESS" ]; then
+                RESULT_DISPLAY="✅ SUCCESS"
+              elif [ "$RESULT" = "FAILURE" ]; then
+                RESULT_DISPLAY="❌ FAILURE"
+                ANY_FAILED=true
+              else
+                RESULT_DISPLAY="⚠️ ${RESULT}"
+              fi
+
+              if [ "$HAS_RESULTS" = "true" ]; then
+                TOTAL=$(jq -r '.total_tests // "N/A"' "$result_file")
+                PASSED=$(jq -r '.passed // "N/A"' "$result_file")
+                FAILED=$(jq -r '.failed // "N/A"' "$result_file")
+                SKIPPED=$(jq -r '.skipped // "N/A"' "$result_file")
+                ERROR=$(jq -r '.error // "N/A"' "$result_file")
+                UNKNOWN=$(jq -r '.unknown // "N/A"' "$result_file")
+              else
+                TOTAL="-"
+                PASSED="-"
+                FAILED="-"
+                SKIPPED="-"
+                ERROR="-"
+                UNKNOWN="-"
+              fi
+
+              echo "| ${GPU_TAG} | ${PLATFORM} | ${RESULT_DISPLAY} | ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${ERROR} | ${UNKNOWN} |" >> $GITHUB_STEP_SUMMARY
+
+              # Collect unique SDK URLs
+              if [ -n "$SDK_URL" ] && [[ ! "$SDK_URLS" =~ "$SDK_URL" ]]; then
+                SDK_URLS="${SDK_URLS}${SDK_URL}\n"
+              fi
+
+              # Collect unique Run IDs
+              if [ -n "$RUN_ID" ] && [[ ! "$RUN_IDS" =~ "$RUN_ID" ]]; then
+                RUN_IDS="${RUN_IDS}${RUN_ID}\n"
+              fi
+            fi
+          done
+
+          # Add TheRock Run IDs section (for bump PRs)
+          if [ -n "$RUN_IDS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**TheRock Run IDs:**" >> $GITHUB_STEP_SUMMARY
+            echo -e "$RUN_IDS" | while read -r run_id; do
+              if [ -n "$run_id" ]; then
+                echo "- [${run_id}](https://github.com/ROCm/TheRock/actions/runs/${run_id})" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          fi
+
+          # Add SDK URLs section (for nightly builds)
+          if [ -n "$SDK_URLS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
+            echo -e "$SDK_URLS" | while read -r url; do
+              if [ -n "$url" ]; then
+                echo "- ${url}" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          fi
