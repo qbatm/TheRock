@@ -83,18 +83,25 @@ jobs:
           # GitHub API base URL
           GITHUB_API="https://api.github.com"
 
-          # Function to check if we've already processed a run
+          # Function to check if we've already processed a run for a specific platform
           check_already_processed() {
             local run_id=$1
             local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
+            local platform=$3  # "linux" or "windows" (optional)
 
-            # Query our own repo for existing workflow runs triggered with this run_id
-            # We search in the workflow run names which include the run_id
+            # Build the search pattern - includes run_id and optionally platform
+            local search_pattern="$run_id"
+            if [ -n "$platform" ]; then
+              search_pattern="${run_id}.*${platform}"
+            fi
+
+            # Query our own repo for existing workflow runs triggered with this run_id (and platform)
+            # We search in the workflow run names which include the run_id and platform
             local existing=$(curl -s \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
               "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100" \
-              | jq -r --arg run_id "$run_id" '.workflow_runs[]? | select(.name | contains($run_id)) | .id' 2>/dev/null | head -1 || echo "")
+              | jq -r --arg pattern "$search_pattern" '.workflow_runs[]? | select(.name | test($pattern)) | .id' 2>/dev/null | head -1 || echo "")
 
             if [ -n "$existing" ]; then
               echo "true"
@@ -173,20 +180,11 @@ jobs:
 
           echo "Found $(echo "$NIGHTLY_RUNS" | jq 'length') nightly runs"
 
-          # Filter out already processed runs
-          FILTERED_NIGHTLY_RUNS="[]"
-          for run_id in $(echo "$NIGHTLY_RUNS" | jq -r '.[]?.id // empty'); do
-            already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml")
-            if [ "$already_processed" = "false" ]; then
-              run_json=$(echo "$NIGHTLY_RUNS" | jq ".[] | select(.id == $run_id)")
-              FILTERED_NIGHTLY_RUNS=$(echo "$FILTERED_NIGHTLY_RUNS" | jq ". + [$run_json]")
-              echo "  New nightly run: $run_id"
-            else
-              echo "  Already processed: $run_id"
-            fi
-          done
+          # For nightly runs, we don't filter here because we trigger per-platform
+          # The deduplication check happens in the trigger phase per platform
+          FILTERED_NIGHTLY_RUNS="$NIGHTLY_RUNS"
+          echo "Nightly runs to consider: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
 
-          echo "Filtered nightly runs: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
 
           # Output results as base64 to avoid JSON escaping issues
           echo "bump_runs_b64=$(echo "$FILTERED_BUMP_RUNS" | base64 -w0)" >> $GITHUB_OUTPUT
@@ -226,6 +224,9 @@ jobs:
           echo "Triggering bump PR workflows..."
           BUMP_COUNT=$(echo "$BUMP_RUNS" | jq 'length')
 
+          # For bump PRs, use the specified platform or default to linux
+          BUMP_PLATFORM="${PLATFORM:-linux}"
+
           for i in $(seq 0 $((BUMP_COUNT - 1))); do
             run=$(echo "$BUMP_RUNS" | jq ".[$i]")
             run_id=$(echo "$run" | jq -r '.id')
@@ -233,7 +234,7 @@ jobs:
             run_title=$(echo "$run" | jq -r '.display_title')
             run_conclusion=$(echo "$run" | jq -r '.conclusion')
 
-            echo "  Triggering orchestrai-bump for run $run_id..."
+            echo "  Triggering orchestrai-bump for run $run_id (${BUMP_PLATFORM})..."
 
             # Trigger the workflow using the GitHub API
             RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
@@ -247,7 +248,7 @@ jobs:
                   \"run_url\": \"${run_url}\",
                   \"run_title\": \"${run_title}\",
                   \"run_conclusion\": \"${run_conclusion}\",
-                  \"platform\": \"${PLATFORM}\"
+                  \"platform\": \"${BUMP_PLATFORM}\"
                 }
               }")
 
@@ -256,10 +257,10 @@ jobs:
 
             if [ "$HTTP_CODE" = "204" ]; then
               echo "    ✅ Triggered successfully"
-              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"triggered\"}]")
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$BUMP_PLATFORM\", \"status\": \"triggered\"}]")
             else
               echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
-              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$BUMP_PLATFORM\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
             fi
           done
 
@@ -269,6 +270,13 @@ jobs:
           echo "Triggering nightly workflows..."
           NIGHTLY_COUNT=$(echo "$NIGHTLY_RUNS" | jq 'length')
 
+          # For nightly builds, trigger both platforms unless a specific one is selected
+          if [ -z "${PLATFORM}" ]; then
+            PLATFORMS_TO_TRIGGER="linux windows"
+          else
+            PLATFORMS_TO_TRIGGER="${PLATFORM}"
+          fi
+
           for i in $(seq 0 $((NIGHTLY_COUNT - 1))); do
             run=$(echo "$NIGHTLY_RUNS" | jq ".[$i]")
             run_id=$(echo "$run" | jq -r '.id')
@@ -277,35 +285,44 @@ jobs:
             run_conclusion=$(echo "$run" | jq -r '.conclusion')
             head_sha=$(echo "$run" | jq -r '.head_sha')
 
-            echo "  Triggering orchestrai-nightly for run $run_id..."
+            for PLAT in $PLATFORMS_TO_TRIGGER; do
+              # Check if this run+platform combination was already processed
+              already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml" "$PLAT")
+              if [ "$already_processed" = "true" ]; then
+                echo "  Skipping orchestrai-nightly for run $run_id (${PLAT}) - already processed"
+                continue
+              fi
 
-            # Trigger the workflow using the GitHub API
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-nightly.yml/dispatches" \
-              -d "{
-                \"ref\": \"${{ github.ref_name }}\",
-                \"inputs\": {
-                  \"run_id\": \"${run_id}\",
-                  \"run_url\": \"${run_url}\",
-                  \"run_title\": \"${run_title}\",
-                  \"run_conclusion\": \"${run_conclusion}\",
-                  \"head_sha\": \"${head_sha}\",
-                  \"platform\": \"${PLATFORM}\"
-                }
-              }")
+              echo "  Triggering orchestrai-nightly for run $run_id (${PLAT})..."
 
-            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-            BODY=$(echo "$RESPONSE" | head -n -1)
+              # Trigger the workflow using the GitHub API
+              RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/orchestrai-nightly.yml/dispatches" \
+                -d "{
+                  \"ref\": \"${{ github.ref_name }}\",
+                  \"inputs\": {
+                    \"run_id\": \"${run_id}\",
+                    \"run_url\": \"${run_url}\",
+                    \"run_title\": \"${run_title}\",
+                    \"run_conclusion\": \"${run_conclusion}\",
+                    \"head_sha\": \"${head_sha}\",
+                    \"platform\": \"${PLAT}\"
+                  }
+                }")
 
-            if [ "$HTTP_CODE" = "204" ]; then
-              echo "    ✅ Triggered successfully"
-              TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"triggered\"}]")
-            else
-              echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
-              TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
-            fi
+              HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+              BODY=$(echo "$RESPONSE" | head -n -1)
+
+              if [ "$HTTP_CODE" = "204" ]; then
+                echo "    ✅ Triggered successfully (${PLAT})"
+                TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$PLAT\", \"status\": \"triggered\"}]")
+              else
+                echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
+                TRIGGERED_NIGHTLY=$(echo "$TRIGGERED_NIGHTLY" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"$PLAT\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")
+              fi
+            done
           done
 
           echo "triggered_bump=$(echo "$TRIGGERED_BUMP" | jq -c '.')" >> $GITHUB_OUTPUT
@@ -356,15 +373,15 @@ jobs:
 
             if [ -n "$TRIGGERED_BUMP" ] && [ "$TRIGGERED_BUMP" != "[]" ]; then
               echo "#### Bump PR Workflows" >> $GITHUB_STEP_SUMMARY
-              echo "| Run ID | Status |" >> $GITHUB_STEP_SUMMARY
-              echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-              echo "$TRIGGERED_BUMP" | jq -r '.[] | "| \(.run_id) | \(.status) |"' >> $GITHUB_STEP_SUMMARY
+              echo "| Run ID | Platform | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$TRIGGERED_BUMP" | jq -r '.[] | "| \(.run_id) | \(.platform // "linux") | \(.status) |"' >> $GITHUB_STEP_SUMMARY
             fi
 
             if [ -n "$TRIGGERED_NIGHTLY" ] && [ "$TRIGGERED_NIGHTLY" != "[]" ]; then
               echo "#### Nightly Workflows" >> $GITHUB_STEP_SUMMARY
-              echo "| Run ID | Status |" >> $GITHUB_STEP_SUMMARY
-              echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-              echo "$TRIGGERED_NIGHTLY" | jq -r '.[] | "| \(.run_id) | \(.status) |"' >> $GITHUB_STEP_SUMMARY
+              echo "| Run ID | Platform | Status |" >> $GITHUB_STEP_SUMMARY
+              echo "|--------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+              echo "$TRIGGERED_NIGHTLY" | jq -r '.[] | "| \(.run_id) | \(.platform // "linux") | \(.status) |"' >> $GITHUB_STEP_SUMMARY
             fi
           fi

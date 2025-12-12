@@ -1,4 +1,5 @@
 name: OrchestrAI - Bump PR
+run-name: "OrchestrAI Bump PR - Run ${{ inputs.run_id }} (${{ inputs.platform }})"
 
 # This workflow is triggered by poll-therock-orchestrai.yml when a new bump PR
 # is discovered from ROCm/TheRock. It uses the reusable-trigger-orchestrai.yml
