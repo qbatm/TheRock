@@ -50,9 +50,10 @@ jobs:
     uses: ./.github/workflows/reusable-trigger-orchestrai.yml
     with:
       platform: ${{ inputs.platform }}
-      # For nightly builds: pass head_sha for the commit, no run_id
+      # For nightly builds: pass head_sha for the commit, run_id is empty
       # The reusable workflow will use S3 lookup to find the SDK URL
       head_sha: ${{ inputs.head_sha }}
+      run_id: ''
     secrets:
       UCICD_USER: ${{ secrets.UCICD_USER }}
       UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
