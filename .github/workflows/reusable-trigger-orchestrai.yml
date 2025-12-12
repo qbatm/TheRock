@@ -129,6 +129,7 @@ jobs:
           # Add run_id if provided (for bump PRs)
           if [[ -n "${{ inputs.run_id }}" ]]; then
             CMD="$CMD --run-id \"${{ inputs.run_id }}\""
+          fi
 
           # Add SDK URL override if provided (for nightly builds)
           if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
