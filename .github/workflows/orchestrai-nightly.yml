@@ -1,4 +1,5 @@
 name: OrchestrAI - Nightly Build
+run-name: "OrchestrAI Nightly - Run ${{ inputs.run_id }} (${{ inputs.platform }})"
 
 # This workflow is triggered by poll-therock-orchestrai.yml when a new nightly build
 # is discovered from ROCm/TheRock. It uses the reusable-trigger-orchestrai.yml
