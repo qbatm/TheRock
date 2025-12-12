@@ -84,7 +84,7 @@ on:
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/ucicd-production-v1"
+  JENKINS_JOB_PATH: "job/ucicd-production-v1"
 
 jobs:
   # Preprocessing job to generate the matrix of GPU targets
@@ -159,7 +159,7 @@ jobs:
         env:
           UCICD_USER: ${{ secrets.UCICD_USER }}
           UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
-          JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_USER }}
+          JENKINS_TRIGGER_TOKEN: ${{ secrets.UCICD_TRIGGER_TOKEN }}
         run: |
           echo "Triggering OrchestrAI for GPU: ${{ matrix.gpu_tag }} on ${{ matrix.platform }}"
 

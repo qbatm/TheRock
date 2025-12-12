@@ -1,7 +1,7 @@
 name: Poll TheRock for OrchestrAI
 
 # This workflow polls the ROCm/TheRock repository for:
-# 1. Bump PRs - dependabot PRs with title starting with "Bump"
+# 1. Bump PRs - PRs with title starting with "Bump"
 # 2. Nightly builds - scheduled CI nightly runs
 #
 # For each discovered run, it triggers a downstream workflow:
@@ -119,7 +119,7 @@ jobs:
           BUMP_RUNS=$(curl -s \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&actor=dependabot%5Bbot%5D" \
+            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100" \
             | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
               (.conclusion == "success" or .conclusion == "failure") and
               .event == "pull_request" and
@@ -245,14 +245,8 @@ jobs:
           # - If platform is specified: trigger only that platform
           # - For scheduled runs (no input), we default to linux only
           if [ -z "${PLATFORM}" ]; then
-            # Check if this is a scheduled run (no workflow_dispatch inputs)
-            if [ "${{ github.event_name }}" = "schedule" ]; then
-              # Scheduled runs default to linux only
-              PLATFORMS_TO_TRIGGER="linux"
-            else
-              # Manual dispatch with empty platform = trigger both
-              PLATFORMS_TO_TRIGGER="linux windows"
-            fi
+            # Both scheduled runs and manual dispatch with empty platform trigger both platforms
+            PLATFORMS_TO_TRIGGER="linux windows"
           else
             PLATFORMS_TO_TRIGGER="${PLATFORM}"
           fi
