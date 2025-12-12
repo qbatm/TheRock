@@ -21,7 +21,7 @@ on:
         description: 'Hours to look back for runs'
         required: false
         type: number
-        default: 1
+        default: 15
       dry_run:
         description: 'Dry run mode (do not trigger downstream workflows)'
         required: false
@@ -49,8 +49,8 @@ env:
   # Workflow IDs for the CI workflows we want to poll
   CI_WORKFLOW: "ci.yml"
   CI_NIGHTLY_WORKFLOW: "ci_nightly.yml"
-  # Lookback period in hours (default 1 hour for scheduled runs)
-  DEFAULT_LOOKBACK_HOURS: 1
+  # Lookback period in hours (default 15 hours for scheduled runs)
+  DEFAULT_LOOKBACK_HOURS: 15
 
 jobs:
   # Job to discover new runs from TheRock repo and trigger downstream workflows
