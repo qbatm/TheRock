@@ -23,7 +23,7 @@ on:
       pool_type:
         description: 'Jenkins agent pool type'
         type: string
-        default: 'ucicd_production_hot_machines'
+        default: 'default_hot'
 
 permissions:
   contents: read

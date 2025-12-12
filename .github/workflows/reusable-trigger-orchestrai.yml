@@ -21,7 +21,7 @@ on:
         description: 'Jenkins agent pool type'
         required: false
         type: string
-        default: 'ucicd_production_hot_machines'
+        default: 'default_hot'
       polling_interval:
         description: 'Polling interval in seconds'
         required: false
@@ -65,7 +65,7 @@ on:
         description: 'Jenkins agent pool type'
         required: false
         type: string
-        default: 'ucicd_production_hot_machines'
+        default: 'default_hot'
       polling_interval:
         description: 'Polling interval in seconds'
         required: false
