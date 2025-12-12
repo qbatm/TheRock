@@ -272,6 +272,7 @@ jobs:
             run_url=$(echo "$run" | jq -r '.html_url')
             run_title=$(echo "$run" | jq -r '.display_title')
             run_conclusion=$(echo "$run" | jq -r '.conclusion')
+            head_sha=$(echo "$run" | jq -r '.head_sha')
 
             for PLAT in $PLATFORMS_TO_TRIGGER; do
               # Check if this run+platform combination was already processed
@@ -295,6 +296,7 @@ jobs:
                     \"run_url\": \"${run_url}\",
                     \"run_title\": \"${run_title}\",
                     \"run_conclusion\": \"${run_conclusion}\",
+                    \"head_sha\": \"${head_sha}\",
                     \"platform\": \"${PLAT}\"
                   }
                 }")

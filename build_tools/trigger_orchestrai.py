@@ -420,8 +420,8 @@ def main():
     )
     parser.add_argument(
         "--commit-id",
-        required=True,
-        help="GitHub commit SHA"
+        default="",
+        help="GitHub commit SHA (optional for bump PRs with run_id)"
     )
 
     # Optional parameters
