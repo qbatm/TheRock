@@ -84,6 +84,7 @@ jobs:
           GITHUB_API="https://api.github.com"
 
           # Function to check if we've already processed a run for a specific platform
+          # Uses pagination to search through all workflow runs
           check_already_processed() {
             local run_id=$1
             local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
@@ -97,17 +98,35 @@ jobs:
 
             # Query our own repo for existing workflow runs triggered with this run_id (and platform)
             # We search in the workflow run names which include the run_id and platform
-            local existing=$(curl -s \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100" \
-              | jq -r --arg pattern "$search_pattern" '.workflow_runs[]? | select(.name | test($pattern)) | .id' 2>/dev/null | head -1 || echo "")
+            # Use pagination to check all runs (up to 10 pages = 1000 runs)
+            local page=1
+            local max_pages=10
+            while [ $page -le $max_pages ]; do
+              local existing=$(curl -s \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100&page=${page}" \
+                | jq -r --arg pattern "$search_pattern" '.workflow_runs[]? | select(.name | test($pattern)) | .id' 2>/dev/null | head -1 || echo "")
 
-            if [ -n "$existing" ]; then
-              echo "true"
-            else
-              echo "false"
-            fi
+              if [ -n "$existing" ]; then
+                echo "true"
+                return
+              fi
+
+              # Check if we got fewer than 100 results (last page)
+              local count=$(curl -s \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100&page=${page}" \
+                | jq '.workflow_runs | length' 2>/dev/null || echo "0")
+
+              if [ "$count" -lt 100 ]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+
+            echo "false"
           }
 
           # =====================
@@ -115,28 +134,61 @@ jobs:
           # =====================
           echo "Discovering bump PRs from ${{ env.THEROCK_REPO }}..."
 
-          # Query CI workflow runs for bump PRs using curl
-          BUMP_RUNS=$(curl -s \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100" \
-            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
-              (.conclusion == "success" or .conclusion == "failure") and
-              .event == "pull_request" and
-              (.display_title | startswith("Bump")) and
-              (.created_at >= $cutoff)
-            ) | {
-              id: .id,
-              run_number: .run_number,
-              display_title: .display_title,
-              conclusion: .conclusion,
-              head_sha: .head_sha,
-              head_branch: .head_branch,
-              created_at: .created_at,
-              html_url: .html_url
-            }]' 2>/dev/null || echo "[]")
+          # Query CI workflow runs for bump PRs using curl with pagination
+          BUMP_RUNS="[]"
+          page=1
+          max_pages=10
+          while [ $page -le $max_pages ]; do
+            PAGE_RESULTS=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&page=${page}" \
+              | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
+                (.conclusion == "success" or .conclusion == "failure") and
+                .event == "pull_request" and
+                (.display_title | startswith("Bump")) and
+                (.created_at >= $cutoff)
+              ) | {
+                id: .id,
+                run_number: .run_number,
+                display_title: .display_title,
+                conclusion: .conclusion,
+                head_sha: .head_sha,
+                head_branch: .head_branch,
+                created_at: .created_at,
+                html_url: .html_url
+              }]' 2>/dev/null || echo "[]")
 
-          echo "Found $(echo "$BUMP_RUNS" | jq 'length') bump PR runs"
+            # Merge results
+            BUMP_RUNS=$(echo "$BUMP_RUNS" "$PAGE_RESULTS" | jq -s 'add')
+
+            # Check if we got fewer than 100 results (last page) or all results are older than cutoff
+            TOTAL_ON_PAGE=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&page=${page}" \
+              | jq '.workflow_runs | length' 2>/dev/null || echo "0")
+
+            if [ "$TOTAL_ON_PAGE" -lt 100 ]; then
+              break
+            fi
+
+            # Also check if oldest run on page is older than cutoff (no need to continue)
+            OLDEST_ON_PAGE=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_WORKFLOW }}/runs?per_page=100&page=${page}" \
+              | jq -r '.workflow_runs[-1]?.created_at // ""' 2>/dev/null || echo "")
+
+            if [ -n "$OLDEST_ON_PAGE" ] && [[ "$OLDEST_ON_PAGE" < "$CUTOFF_TIME" ]]; then
+              echo "  Reached runs older than cutoff on page $page, stopping pagination"
+              break
+            fi
+
+            page=$((page + 1))
+          done
+
+          echo "Found $(echo "$BUMP_RUNS" | jq 'length') bump PR runs (searched $page page(s))"
 
           # Filter out already processed runs
           FILTERED_BUMP_RUNS="[]"
@@ -158,27 +210,60 @@ jobs:
           # =====================
           echo "Discovering nightly builds from ${{ env.THEROCK_REPO }}..."
 
-          # Query CI nightly workflow runs using curl
-          NIGHTLY_RUNS=$(curl -s \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&branch=main" \
-            | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
-              (.conclusion == "success" or .conclusion == "failure") and
-              .event == "schedule" and
-              (.created_at >= $cutoff)
-            ) | {
-              id: .id,
-              run_number: .run_number,
-              display_title: .display_title,
-              conclusion: .conclusion,
-              head_sha: .head_sha,
-              head_branch: .head_branch,
-              created_at: .created_at,
-              html_url: .html_url
-            }]' 2>/dev/null || echo "[]")
+          # Query CI nightly workflow runs using curl with pagination
+          NIGHTLY_RUNS="[]"
+          page=1
+          max_pages=10
+          while [ $page -le $max_pages ]; do
+            PAGE_RESULTS=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&page=${page}&branch=main" \
+              | jq --arg cutoff "$CUTOFF_TIME" '[.workflow_runs[]? | select(
+                (.conclusion == "success" or .conclusion == "failure") and
+                .event == "schedule" and
+                (.created_at >= $cutoff)
+              ) | {
+                id: .id,
+                run_number: .run_number,
+                display_title: .display_title,
+                conclusion: .conclusion,
+                head_sha: .head_sha,
+                head_branch: .head_branch,
+                created_at: .created_at,
+                html_url: .html_url
+              }]' 2>/dev/null || echo "[]")
 
-          echo "Found $(echo "$NIGHTLY_RUNS" | jq 'length') nightly runs"
+            # Merge results
+            NIGHTLY_RUNS=$(echo "$NIGHTLY_RUNS" "$PAGE_RESULTS" | jq -s 'add')
+
+            # Check if we got fewer than 100 results (last page)
+            TOTAL_ON_PAGE=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&page=${page}&branch=main" \
+              | jq '.workflow_runs | length' 2>/dev/null || echo "0")
+
+            if [ "$TOTAL_ON_PAGE" -lt 100 ]; then
+              break
+            fi
+
+            # Also check if oldest run on page is older than cutoff (no need to continue)
+            OLDEST_ON_PAGE=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/actions/workflows/${{ env.CI_NIGHTLY_WORKFLOW }}/runs?per_page=100&page=${page}&branch=main" \
+              | jq -r '.workflow_runs[-1]?.created_at // ""' 2>/dev/null || echo "")
+
+            if [ -n "$OLDEST_ON_PAGE" ] && [[ "$OLDEST_ON_PAGE" < "$CUTOFF_TIME" ]]; then
+              echo "  Reached runs older than cutoff on page $page, stopping pagination"
+              break
+            fi
+
+            page=$((page + 1))
+          done
+
+          echo "Found $(echo "$NIGHTLY_RUNS" | jq 'length') nightly runs (searched $page page(s))"
 
           # For nightly runs, we don't filter here because we trigger per-platform
           # The deduplication check happens in the trigger phase per platform
@@ -211,6 +296,7 @@ jobs:
           GITHUB_API="https://api.github.com"
 
           # Function to check if we've already processed a run for a specific platform
+          # Uses pagination to search through all workflow runs
           check_already_processed() {
             local run_id=$1
             local workflow=$2  # "orchestrai-bump.yml" or "orchestrai-nightly.yml"
@@ -224,17 +310,35 @@ jobs:
 
             # Query our own repo for existing workflow runs triggered with this run_id (and platform)
             # We search in the workflow run names which include the run_id and platform
-            local existing=$(curl -s \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100" \
-              | jq -r --arg pattern "$search_pattern" '.workflow_runs[]? | select(.name | test($pattern)) | .id' 2>/dev/null | head -1 || echo "")
+            # Use pagination to check all runs (up to 10 pages = 1000 runs)
+            local page=1
+            local max_pages=10
+            while [ $page -le $max_pages ]; do
+              local existing=$(curl -s \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100&page=${page}" \
+                | jq -r --arg pattern "$search_pattern" '.workflow_runs[]? | select(.name | test($pattern)) | .id' 2>/dev/null | head -1 || echo "")
 
-            if [ -n "$existing" ]; then
-              echo "true"
-            else
-              echo "false"
-            fi
+              if [ -n "$existing" ]; then
+                echo "true"
+                return
+              fi
+
+              # Check if we got fewer than 100 results (last page)
+              local count=$(curl -s \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                "${GITHUB_API}/repos/${{ github.repository }}/actions/workflows/${workflow}/runs?per_page=100&page=${page}" \
+                | jq '.workflow_runs | length' 2>/dev/null || echo "0")
+
+              if [ "$count" -lt 100 ]; then
+                break
+              fi
+              page=$((page + 1))
+            done
+
+            echo "false"
           }
 
           # Get platform input - empty string means "all platforms"
