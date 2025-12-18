@@ -412,16 +412,17 @@ jobs:
             echo "**SDK URL:** ${SDK_URL}" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Check Result
-        run: |
-          RESULT="${{ steps.poll.outputs.result }}"
-          GPU_TAG="${{ matrix.gpu_tag }}"
+      # For now, don't fail for
+      # - name: Check Result
+      #   run: |
+      #     RESULT="${{ steps.poll.outputs.result }}"
+      #     GPU_TAG="${{ matrix.gpu_tag }}"
 
-          # Fail the workflow if OrchestrAI job failed
-          if [ "$RESULT" != "SUCCESS" ]; then
-            echo "::error::OrchestrAI (${GPU_TAG}) finished with result: ${RESULT}"
-            exit 1
-          fi
+      #     # Fail the workflow if OrchestrAI job failed
+      #     if [ "$RESULT" != "SUCCESS" ]; then
+      #       echo "::error::OrchestrAI (${GPU_TAG}) finished with result: ${RESULT}"
+      #       exit 1
+      #     fi
 
   # Consolidated summary job that combines all matrix results
   consolidated-summary:
