@@ -1,5 +1,5 @@
 name: OrchestrAI - Bump PR
-run-name: "OrchestrAI Bump PR - Run ${{ inputs.run_id }} (${{ inputs.platform }})"
+run-name: "OrchestrAI Bump PR - Run ${{ inputs.run_id }}"
 
 # This workflow is triggered by poll-therock-orchestrai.yml when a new bump PR
 # is discovered from ROCm/TheRock. It uses the reusable-trigger-orchestrai.yml
@@ -7,6 +7,10 @@ run-name: "OrchestrAI Bump PR - Run ${{ inputs.run_id }} (${{ inputs.platform }}
 #
 # For bump PRs, we pass the run_id and Jenkins uses install_rocm_from_artifacts.py
 # to download artifacts directly from the GitHub Actions run.
+#
+# The platform input controls which platforms to run on:
+# - Empty string or not provided: runs on ALL platforms (linux and windows)
+# - "linux" or "windows": runs only on the specified platform
 
 on:
   workflow_dispatch:
@@ -36,13 +40,10 @@ on:
         type: string
         default: ''
       platform:
-        description: 'Platform to trigger (linux or windows)'
+        description: 'Platform to trigger (linux, windows, or empty for all)'
         required: false
-        type: choice
-        options:
-          - linux
-          - windows
-        default: linux
+        type: string
+        default: ''
 
 jobs:
   trigger-orchestrai:
@@ -76,5 +77,7 @@ jobs:
           if [ -n "${{ inputs.run_conclusion }}" ]; then
             echo "**TheRock Conclusion:** ${{ inputs.run_conclusion }}" >> $GITHUB_STEP_SUMMARY
           fi
+          PLATFORM="${{ inputs.platform }}"
+          echo "**Platform:** ${PLATFORM:-all}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**OrchestrAI Result:** ${{ needs.trigger-orchestrai.result }}" >> $GITHUB_STEP_SUMMARY

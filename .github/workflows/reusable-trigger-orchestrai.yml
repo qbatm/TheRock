@@ -4,9 +4,10 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: 'Platform to trigger (linux or windows)'
-        required: true
+        description: 'Platform to trigger (linux, windows, or empty for all platforms)'
+        required: false
         type: string
+        default: ''
       sdk_url_override:
         description: 'Override SDK URL (skips S3 lookup, for nightly builds)'
         required: false
@@ -50,10 +51,11 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: 'Platform to trigger (linux or windows)'
-        required: true
+        description: 'Platform to trigger (linux, windows, or empty for all)'
+        required: false
         type: choice
         options:
+          - ''
           - linux
           - windows
       sdk_url_override:
@@ -116,45 +118,70 @@ jobs:
       - name: Generate trigger configurations
         id: generate_matrix
         run: |
-          echo "Generating OrchestrAI trigger configurations for ${{ inputs.platform }}..."
+          PLATFORM="${{ inputs.platform }}"
 
-          # Build the command with optional parameters
-          CMD="python build_tools/trigger_orchestrai.py --mode generate --platform ${{ inputs.platform }}"
-
-          # Always use head_sha from TheRock when provided (for both bump PRs and nightly builds)
-          if [[ -n "${{ inputs.head_sha }}" ]]; then
-            CMD="$CMD --commit-id ${{ inputs.head_sha }}"
+          # If platform is empty, generate configs for all platforms (linux and windows)
+          if [[ -z "$PLATFORM" ]]; then
+            echo "Generating OrchestrAI trigger configurations for ALL platforms..."
+            PLATFORMS_TO_GENERATE="linux windows"
+          else
+            echo "Generating OrchestrAI trigger configurations for $PLATFORM..."
+            PLATFORMS_TO_GENERATE="$PLATFORM"
           fi
 
-          # Add run_id if provided (for bump PRs)
-          if [[ -n "${{ inputs.run_id }}" ]]; then
-            CMD="$CMD --run-id \"${{ inputs.run_id }}\""
-          fi
+          # Initialize empty array for combined configs
+          ALL_CONFIGS="[]"
 
-          # Add SDK URL override if provided (for nightly builds)
-          if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
-            CMD="$CMD --sdk-url \"${{ inputs.sdk_url_override }}\""
-          fi
+          for PLAT in $PLATFORMS_TO_GENERATE; do
+            echo "Generating configs for platform: $PLAT"
 
-          # Add pool type if provided
-          if [[ -n "${{ inputs.pool_type }}" ]]; then
-            CMD="$CMD --pool-type \"${{ inputs.pool_type }}\""
-          fi
+            # Build the command with optional parameters
+            CMD="python build_tools/trigger_orchestrai.py --mode generate --platform $PLAT"
 
-          # Add GitHub output file
-          CMD="$CMD --github-output $GITHUB_OUTPUT"
+            # Always use head_sha from TheRock when provided (for both bump PRs and nightly builds)
+            if [[ -n "${{ inputs.head_sha }}" ]]; then
+              CMD="$CMD --commit-id ${{ inputs.head_sha }}"
+            fi
 
-          echo "Running: $CMD"
-          eval $CMD
+            # Add run_id if provided (for bump PRs)
+            if [[ -n "${{ inputs.run_id }}" ]]; then
+              CMD="$CMD --run-id \"${{ inputs.run_id }}\""
+            fi
 
-          # Read the trigger configs and transform to matrix format
-          TRIGGER_CONFIGS=$(grep -oP 'trigger_configs=\K.*' $GITHUB_OUTPUT || echo "[]")
+            # Add SDK URL override if provided (for nightly builds)
+            if [[ -n "${{ inputs.sdk_url_override }}" ]]; then
+              CMD="$CMD --sdk-url \"${{ inputs.sdk_url_override }}\""
+            fi
+
+            # Add pool type if provided
+            if [[ -n "${{ inputs.pool_type }}" ]]; then
+              CMD="$CMD --pool-type \"${{ inputs.pool_type }}\""
+            fi
+
+            # Create a temp file for this platform's output
+            TEMP_OUTPUT=$(mktemp)
+            CMD="$CMD --github-output $TEMP_OUTPUT"
+
+            echo "Running: $CMD"
+            eval $CMD
+
+            # Read the trigger configs for this platform
+            PLAT_CONFIGS=$(grep -oP 'trigger_configs=\K.*' $TEMP_OUTPUT || echo "[]")
+            echo "  Found $(echo "$PLAT_CONFIGS" | jq 'length') configurations for $PLAT"
+
+            # Merge into all configs
+            ALL_CONFIGS=$(echo "$ALL_CONFIGS" "$PLAT_CONFIGS" | jq -s 'add')
+            rm -f $TEMP_OUTPUT
+          done
+
+          # Output combined trigger_configs
+          echo "trigger_configs=$ALL_CONFIGS" >> $GITHUB_OUTPUT
 
           # Create matrix JSON with include array
-          MATRIX=$(echo "$TRIGGER_CONFIGS" | jq -c '{include: .}')
+          MATRIX=$(echo "$ALL_CONFIGS" | jq -c '{include: .}')
           echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
 
-          echo "✅ Matrix generated with $(echo "$TRIGGER_CONFIGS" | jq 'length') configurations"
+          echo "✅ Matrix generated with $(echo "$ALL_CONFIGS" | jq 'length') configurations across platforms: $PLATFORMS_TO_GENERATE"
 
   # Matrix job that triggers each GPU target in parallel
   trigger-orchestrai:
