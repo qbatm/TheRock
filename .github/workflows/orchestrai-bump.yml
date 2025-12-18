@@ -35,6 +35,16 @@ on:
         required: false
         type: string
         default: ''
+      pr_number:
+        description: 'PR number to post results comment to'
+        required: false
+        type: string
+        default: ''
+      pr_repo:
+        description: 'Repository for the PR (e.g., ROCm/TheRock)'
+        required: false
+        type: string
+        default: 'ROCm/TheRock'
       platform:
         description: 'Platform to trigger (linux or windows)'
         required: false
@@ -52,9 +62,12 @@ jobs:
       platform: ${{ inputs.platform }}
       run_id: ${{ inputs.run_id }}
       head_sha: ${{ inputs.head_sha }}
+      pr_number: ${{ inputs.pr_number }}
+      pr_repo: ${{ inputs.pr_repo }}
     secrets:
       UCICD_USER: ${{ secrets.UCICD_USER }}
       UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+      GITHUB_TOKEN_PR_COMMENT: ${{ secrets.GITHUB_TOKEN }}
 
   summary:
     name: Bump PR Summary

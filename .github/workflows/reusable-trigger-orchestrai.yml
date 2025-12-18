@@ -42,11 +42,24 @@ on:
         required: false
         type: boolean
         default: false
+      pr_number:
+        description: 'PR number to post results comment to (optional, for bump PRs)'
+        required: false
+        type: string
+        default: ''
+      pr_repo:
+        description: 'Repository for the PR (e.g., ROCm/TheRock). Defaults to ROCm/TheRock if not specified.'
+        required: false
+        type: string
+        default: 'ROCm/TheRock'
     secrets:
       UCICD_USER:
         required: true
       UCICD_TOKEN:
         required: true
+      GITHUB_TOKEN_PR_COMMENT:
+        description: 'GitHub token with permission to post comments on PRs (optional)'
+        required: false
   workflow_dispatch:
     inputs:
       platform:
@@ -91,6 +104,16 @@ on:
         required: false
         type: boolean
         default: false
+      pr_number:
+        description: 'PR number to post results comment to (optional, for bump PRs)'
+        required: false
+        type: string
+        default: ''
+      pr_repo:
+        description: 'Repository for the PR (e.g., ROCm/TheRock). Defaults to ROCm/TheRock if not specified.'
+        required: false
+        type: string
+        default: 'ROCm/TheRock'
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
@@ -529,3 +552,88 @@ jobs:
               fi
             done
           fi
+
+      - name: Post Comment to PR
+        if: ${{ inputs.pr_number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN_PR_COMMENT || github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_REPO: ${{ inputs.pr_repo }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          echo "Posting OrchestrAI results comment to PR #${PR_NUMBER} in ${PR_REPO}..."
+
+          # Check if we have any results
+          if [ ! -d results ] || [ -z "$(ls -A results 2>/dev/null)" ]; then
+            echo "No test results available, skipping PR comment"
+            exit 0
+          fi
+
+          # Build the comment body
+          COMMENT_BODY="### OrchestrAI Test Results Summary - ${{inputs.platform }}\n\n"
+          COMMENT_BODY+="| GPU Target | Platform | Result | Total Tests | Passed | Failed | Skipped | Error | Unknown |\n"
+          COMMENT_BODY+="|------------|----------|--------|-------------|--------|--------|---------|-------|---------|"
+
+          # Track unique Run IDs for TheRock links
+          RUN_IDS=""
+
+          # Process each result file
+          for result_file in results/*.json; do
+            if [ -f "$result_file" ]; then
+              GPU_TAG=$(jq -r '.gpu_tag // "N/A"' "$result_file")
+              PLATFORM=$(jq -r '.platform // "N/A"' "$result_file")
+              RESULT=$(jq -r '.result // "UNKNOWN"' "$result_file")
+              RUN_ID=$(jq -r '.run_id // ""' "$result_file")
+              HAS_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
+
+              # Format result with emoji
+              if [ "$RESULT" = "SUCCESS" ]; then
+                RESULT_DISPLAY="✅ SUCCESS"
+              elif [ "$RESULT" = "FAILURE" ]; then
+                RESULT_DISPLAY="❌ FAILURE"
+              else
+                RESULT_DISPLAY="⚠️ ${RESULT}"
+              fi
+
+              if [ "$HAS_RESULTS" = "true" ]; then
+                TOTAL=$(jq -r '.total_tests // "N/A"' "$result_file")
+                PASSED=$(jq -r '.passed // "N/A"' "$result_file")
+                FAILED=$(jq -r '.failed // "N/A"' "$result_file")
+                SKIPPED=$(jq -r '.skipped // "N/A"' "$result_file")
+                ERROR=$(jq -r '.error // "N/A"' "$result_file")
+                UNKNOWN=$(jq -r '.unknown // "N/A"' "$result_file")
+              else
+                TOTAL="-"
+                PASSED="-"
+                FAILED="-"
+                SKIPPED="-"
+                ERROR="-"
+                UNKNOWN="-"
+              fi
+
+              COMMENT_BODY+="\n| ${GPU_TAG} | ${PLATFORM} | ${RESULT_DISPLAY} | ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${ERROR} | ${UNKNOWN} |"
+
+              # Collect unique Run IDs
+              if [ -n "$RUN_ID" ] && [[ ! "$RUN_IDS" =~ "$RUN_ID" ]]; then
+                RUN_IDS="${RUN_IDS}${RUN_ID}\n"
+              fi
+            fi
+          done
+
+          # Add TheRock Run IDs section
+          if [ -n "$RUN_IDS" ]; then
+            COMMENT_BODY+="\n\n**TheRock Run IDs:**"
+            echo -e "$RUN_IDS" | while read -r run_id; do
+              if [ -n "$run_id" ]; then
+                COMMENT_BODY+="\n- [${run_id}](https://github.com/ROCm/TheRock/actions/runs/${run_id})"
+              fi
+            done
+          fi
+
+          # Add S3 Logs link
+          COMMENT_BODY+="\n\n**S3 Logs:** [View Logs](${WORKFLOW_RUN_URL})"
+
+          # Post the comment using GitHub CLI
+          echo -e "$COMMENT_BODY" | gh pr comment "${PR_NUMBER}" --repo "${PR_REPO}" --body-file -
+
+          echo "✅ Successfully posted comment to PR #${PR_NUMBER}"
