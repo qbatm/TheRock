@@ -630,8 +630,8 @@ jobs:
             done
           fi
 
-          # Add S2 Logs link
-          COMMENT_BODY+="\n\n**S2 Logs:** [View Logs](${WORKFLOW_RUN_URL})"
+          # Add S3 Logs link
+          COMMENT_BODY+="\n\n**S3 Logs:** [View Logs](${WORKFLOW_RUN_URL})"
 
           # Post the comment using GitHub CLI
           echo -e "$COMMENT_BODY" | gh pr comment "${PR_NUMBER}" --repo "${PR_REPO}" --body-file -
