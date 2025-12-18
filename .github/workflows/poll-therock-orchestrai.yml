@@ -156,7 +156,8 @@ jobs:
                 head_sha: .head_sha,
                 head_branch: .head_branch,
                 created_at: .created_at,
-                html_url: .html_url
+                html_url: .html_url,
+                pr_number: (.pull_requests[0].number // null)
               }]' 2>/dev/null || echo "[]")
 
             # Merge results
@@ -377,6 +378,7 @@ jobs:
             run_title=$(echo "$run" | jq -r '.display_title')
             run_conclusion=$(echo "$run" | jq -r '.conclusion')
             head_sha=$(echo "$run" | jq -r '.head_sha')
+            pr_number=$(echo "$run" | jq -r '.pr_number // ""')
 
             for PLAT in $PLATFORMS_TO_TRIGGER; do
               # Check if this run+platform combination was already processed
@@ -387,6 +389,9 @@ jobs:
               fi
 
               echo "  Triggering orchestrai-bump for run $run_id (${PLAT})..."
+              if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+                echo "    PR number: $pr_number"
+              fi
 
               # Trigger the workflow using the GitHub API
               RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
@@ -401,7 +406,9 @@ jobs:
                     \"run_title\": \"${run_title}\",
                     \"run_conclusion\": \"${run_conclusion}\",
                     \"head_sha\": \"${head_sha}\",
-                    \"platform\": \"${PLAT}\"
+                    \"platform\": \"${PLAT}\",
+                    \"pr_number\": \"${pr_number}\",
+                    \"pr_repo\": \"${{ env.THEROCK_REPO }}\"
                   }
                 }")
 
