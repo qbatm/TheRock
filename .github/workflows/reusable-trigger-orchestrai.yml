@@ -177,12 +177,16 @@ jobs:
             rm -f $TEMP_OUTPUT
           done
 
-          # Create matrix JSON with include array
+          # Create matrix JSON with include array (compact single-line format)
           MATRIX=$(echo "$ALL_CONFIGS" | jq -c '{include: .}')
-          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
-          echo "trigger_configs=${ALL_CONFIGS}" >> $GITHUB_OUTPUT
 
-          echo "✅ Matrix generated with $(echo "$ALL_CONFIGS" | jq 'length') configurations across platforms: $PLATFORMS"
+          # Output the matrix - use EOF delimiter for multi-line safe output
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+          TOTAL_COUNT=$(echo "$ALL_CONFIGS" | jq 'length')
+          echo "trigger_count=${TOTAL_COUNT}" >> $GITHUB_OUTPUT
+
+          echo "✅ Matrix generated with ${TOTAL_COUNT} configurations across platforms: $PLATFORMS"
 
   # Matrix job that triggers each GPU target in parallel
   trigger-orchestrai:
