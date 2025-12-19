@@ -97,7 +97,8 @@ on:
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  JENKINS_JOB_PATH: "job/ucicd-production-v1"
+  # JENKINS_JOB_PATH: "job/ucicd-production-v1"
+  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test/"
 
 jobs:
   # Preprocessing job to generate the matrix of GPU targets
