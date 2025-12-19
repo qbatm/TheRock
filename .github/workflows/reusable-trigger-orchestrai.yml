@@ -37,7 +37,7 @@ on:
         description: 'Timeout in minutes'
         required: false
         type: number
-        default: 240 # 4 hour timeout
+        default: 1 # 240 # 4 hour timeout
       skip_individual_summaries:
         description: 'Skip writing individual job summaries (only write consolidated summary)'
         required: false
@@ -307,7 +307,9 @@ jobs:
             ELAPSED=$((CURRENT_TIME - START_TIME))
 
             if [ $ELAPSED -ge $TIMEOUT_SECONDS ]; then
-              echo "::error::Timeout waiting for OrchestrAI (${{ matrix.gpu_tag }}) to complete"
+              echo "::error::Timeout waiting for OrchestrAI (${{ matrix.platform }}/${{ matrix.gpu_tag }}) to complete"
+              echo "result=TIMEOUT" >> $GITHUB_OUTPUT
+              echo "duration=${ELAPSED}s" >> $GITHUB_OUTPUT
               exit 1
             fi
 
@@ -381,17 +383,25 @@ jobs:
 
       - name: Save Results for Consolidated Summary
         id: save_results
+        if: always()
         run: |
           # Create a JSON file with this job's results for the consolidated summary
           mkdir -p results
-          cat > results/${{ matrix.platform }}-${{ matrix.gpu_tag }}.json << 'EOF'
+
+          # Handle case where result might not be set (e.g., earlier failure)
+          RESULT="${{ steps.poll.outputs.result }}"
+          if [ -z "$RESULT" ]; then
+            RESULT="ERROR"
+          fi
+
+          cat > results/${{ matrix.platform }}-${{ matrix.gpu_tag }}.json << EOF
           {
             "gpu_tag": "${{ matrix.gpu_tag }}",
             "platform": "${{ matrix.platform }}",
             "sdk_url": "${{ steps.trigger.outputs.sdk_url }}",
             "run_id": "${{ steps.trigger.outputs.run_id }}",
             "build_number": "${{ steps.get_build_number.outputs.build_number }}",
-            "result": "${{ steps.poll.outputs.result }}",
+            "result": "${RESULT}",
             "duration": "${{ steps.poll.outputs.duration }}",
             "has_results": "${{ steps.test_results.outputs.has_results }}",
             "test_platform": "${{ steps.test_results.outputs.platform }}",
@@ -407,6 +417,7 @@ jobs:
           echo "Saved results for ${{ matrix.platform }}/${{ matrix.gpu_tag }}"
 
       - name: Upload Results Artifact
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: orchestrai-results-${{ matrix.platform }}-${{ matrix.gpu_tag }}
@@ -505,6 +516,12 @@ jobs:
                 RESULT_DISPLAY="✅ SUCCESS"
               elif [ "$RESULT" = "FAILURE" ]; then
                 RESULT_DISPLAY="❌ FAILURE"
+                ANY_FAILED=true
+              elif [ "$RESULT" = "TIMEOUT" ]; then
+                RESULT_DISPLAY="⏱️ TIMEOUT"
+                ANY_FAILED=true
+              elif [ "$RESULT" = "ERROR" ]; then
+                RESULT_DISPLAY="💥 ERROR"
                 ANY_FAILED=true
               else
                 RESULT_DISPLAY="⚠️ ${RESULT}"
