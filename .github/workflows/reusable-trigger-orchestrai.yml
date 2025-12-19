@@ -37,7 +37,7 @@ on:
         description: 'Timeout in minutes'
         required: false
         type: number
-        default: 1 # 240 # 4 hour timeout
+        default: 240 # 4 hour timeout
       skip_individual_summaries:
         description: 'Skip writing individual job summaries (only write consolidated summary)'
         required: false
@@ -94,7 +94,7 @@ on:
         description: 'Timeout in minutes'
         required: false
         type: number
-        default: 1 # 240 # 4 hour timeout
+        default: 240 # 4 hour timeout
       skip_individual_summaries:
         description: 'Skip writing individual job summaries (only write consolidated summary)'
         required: false
