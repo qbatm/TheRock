@@ -48,6 +48,12 @@ on:
         required: true
       UCICD_TOKEN:
         required: true
+      RP_API_TOKEN:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       platform:
@@ -88,7 +94,7 @@ on:
         description: 'Timeout in minutes'
         required: false
         type: number
-        default: 240 # 4 hour timeout
+        default: 1 # 240 # 4 hour timeout
       skip_individual_summaries:
         description: 'Skip writing individual job summaries (only write consolidated summary)'
         required: false
@@ -99,6 +105,10 @@ env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
   # JENKINS_JOB_PATH: "job/ucicd-production-v1"
   JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test/"
+  REPORT_PORTAL_URL: "http://ucicd-reports-uat.amd.com:8080"
+  REPORT_PORTAL_PROJECT: "ucicd_project_slim"
+  S3_LOGS_BUCKET: "ucicd-therock"
+  S3_LOGS_REGION: "us-east-2"
 
 jobs:
   # Preprocessing job to generate the matrix of GPU targets
@@ -366,6 +376,11 @@ jobs:
             ERROR=$(echo "$TEST_RESULTS" | jq -r '.summary.error // "N/A"')
             UNKNOWN=$(echo "$TEST_RESULTS" | jq -r '.summary.unknown // "N/A"')
 
+            # Try to extract ReportPortal launch name/ID from test results
+            # The launch name is typically stored in the results or can be derived
+            RP_LAUNCH_NAME=$(echo "$TEST_RESULTS" | jq -r '.summary.rp_launch_name // .rp_launch_name // ""')
+            RP_LAUNCH_ID=$(echo "$TEST_RESULTS" | jq -r '.summary.rp_launch_id // .rp_launch_id // ""')
+
             # Output for use in summary step
             echo "has_results=true" >> $GITHUB_OUTPUT
             echo "platform=${PLATFORM}" >> $GITHUB_OUTPUT
@@ -376,9 +391,51 @@ jobs:
             echo "skipped=${SKIPPED}" >> $GITHUB_OUTPUT
             echo "error=${ERROR}" >> $GITHUB_OUTPUT
             echo "unknown=${UNKNOWN}" >> $GITHUB_OUTPUT
+            echo "rp_launch_name=${RP_LAUNCH_NAME}" >> $GITHUB_OUTPUT
+            echo "rp_launch_id=${RP_LAUNCH_ID}" >> $GITHUB_OUTPUT
           else
             echo "⚠️ Test results not available or invalid format"
             echo "has_results=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Scrape ReportPortal URL from Jenkins Summary
+        id: scrape_rp
+        if: ${{ steps.test_results.outputs.rp_launch_id == '' }}
+        env:
+          UCICD_USER: ${{ secrets.UCICD_USER }}
+          UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+          BUILD_NUMBER: ${{ steps.get_build_number.outputs.build_number }}
+        run: |
+          BUILD_URL="${{ env.JENKINS_URL }}/${{ env.JENKINS_JOB_PATH }}/${BUILD_NUMBER}"
+          echo "Scraping ReportPortal URL from Jenkins summary HTML..."
+
+          # Fetch the Jenkins build summary page
+          SUMMARY_HTML=$(curl -s --user "${UCICD_USER}:${UCICD_TOKEN}" \
+            "${BUILD_URL}/" 2>/dev/null || echo "")
+
+          if [ -n "$SUMMARY_HTML" ]; then
+            # Extract ReportPortal URL from the summary HTML
+            # The URL format is: http://ucicd-reports-uat.amd.com:8080/ui/#ucicd_project_slim/launches/all/{launch_id}
+            RP_URL=$(echo "$SUMMARY_HTML" | grep -oP 'href="[^"]*ucicd-reports[^"]*launches/all/\d+[^"]*"' | head -1 | sed 's/href="//;s/"$//')
+
+            if [ -n "$RP_URL" ]; then
+              echo "✅ Found ReportPortal URL: ${RP_URL}"
+
+              # Extract the launch ID from the URL (numeric ID at the end)
+              RP_LAUNCH_ID=$(echo "$RP_URL" | grep -oP 'launches/all/\K\d+')
+
+              if [ -n "$RP_LAUNCH_ID" ]; then
+                echo "✅ Extracted ReportPortal Launch ID: ${RP_LAUNCH_ID}"
+                echo "rp_launch_id=${RP_LAUNCH_ID}" >> $GITHUB_OUTPUT
+                echo "rp_launch_url=${RP_URL}" >> $GITHUB_OUTPUT
+              else
+                echo "⚠️ Could not extract launch ID from URL"
+              fi
+            else
+              echo "⚠️ ReportPortal URL not found in Jenkins summary"
+            fi
+          else
+            echo "⚠️ Could not fetch Jenkins summary page"
           fi
 
       - name: Save Results for Consolidated Summary
@@ -393,6 +450,14 @@ jobs:
           if [ -z "$RESULT" ]; then
             RESULT="ERROR"
           fi
+
+          # Use RP launch ID from test results, or fall back to scraped value
+          RP_LAUNCH_ID="${{ steps.test_results.outputs.rp_launch_id }}"
+          if [ -z "$RP_LAUNCH_ID" ]; then
+            RP_LAUNCH_ID="${{ steps.scrape_rp.outputs.rp_launch_id }}"
+          fi
+
+          RP_LAUNCH_URL="${{ steps.scrape_rp.outputs.rp_launch_url }}"
 
           cat > results/${{ matrix.platform }}-${{ matrix.gpu_tag }}.json << EOF
           {
@@ -411,7 +476,10 @@ jobs:
             "failed": "${{ steps.test_results.outputs.failed }}",
             "skipped": "${{ steps.test_results.outputs.skipped }}",
             "error": "${{ steps.test_results.outputs.error }}",
-            "unknown": "${{ steps.test_results.outputs.unknown }}"
+            "unknown": "${{ steps.test_results.outputs.unknown }}",
+            "rp_launch_name": "${{ steps.test_results.outputs.rp_launch_name }}",
+            "rp_launch_id": "${RP_LAUNCH_ID}",
+            "rp_launch_url": "${RP_LAUNCH_URL}"
           }
           EOF
           echo "Saved results for ${{ matrix.platform }}/${{ matrix.gpu_tag }}"
@@ -474,12 +542,113 @@ jobs:
     if: always()
     runs-on: arc-lnx-pub
     steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          pip install requests
+
       - name: Download All Results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: orchestrai-results-*
           path: results
           merge-multiple: true
+
+      - name: Download Logs from ReportPortal
+        id: download_logs
+        if: ${{ secrets.RP_API_TOKEN != '' }}
+        env:
+          RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
+          REPORT_PORTAL_URL: ${{ env.REPORT_PORTAL_URL }}
+          REPORT_PORTAL_PROJECT: ${{ env.REPORT_PORTAL_PROJECT }}
+        run: |
+          echo "Downloading logs from ReportPortal..."
+          mkdir -p aggregated_logs
+
+          # Process each result file to get RP launch info
+          for result_file in results/*.json; do
+            if [ -f "$result_file" ]; then
+              GPU_TAG=$(jq -r '.gpu_tag // ""' "$result_file")
+              PLATFORM=$(jq -r '.platform // ""' "$result_file")
+              RP_LAUNCH_NAME=$(jq -r '.rp_launch_name // ""' "$result_file")
+              RP_LAUNCH_ID=$(jq -r '.rp_launch_id // ""' "$result_file")
+
+              # Prefer launch ID (scraped from Jenkins summary) over launch name
+              if [ -n "$RP_LAUNCH_ID" ]; then
+                echo "Downloading logs for ${PLATFORM}/${GPU_TAG} (launch ID: ${RP_LAUNCH_ID})..."
+                python build_tools/download_rp_logs.py \
+                  --launch-id "$RP_LAUNCH_ID" \
+                  --output "aggregated_logs/${PLATFORM}_${GPU_TAG}" \
+                  2>&1 || echo "⚠️ Failed to download logs for launch ID ${RP_LAUNCH_ID}"
+              elif [ -n "$RP_LAUNCH_NAME" ]; then
+                echo "Downloading logs for ${PLATFORM}/${GPU_TAG} (launch name: ${RP_LAUNCH_NAME})..."
+                python build_tools/download_rp_logs.py \
+                  --launch-name "$RP_LAUNCH_NAME" \
+                  --output "aggregated_logs/${PLATFORM}_${GPU_TAG}" \
+                  2>&1 || echo "⚠️ Failed to download logs for ${RP_LAUNCH_NAME}"
+              else
+                echo "⚠️ No ReportPortal launch info for ${PLATFORM}/${GPU_TAG}"
+              fi
+            fi
+          done
+
+          # Check if we downloaded any logs
+          if [ -d aggregated_logs ] && [ -n "$(find aggregated_logs -type f 2>/dev/null)" ]; then
+            echo "has_logs=true" >> $GITHUB_OUTPUT
+            LOG_COUNT=$(find aggregated_logs -type f | wc -l)
+            echo "Downloaded ${LOG_COUNT} log files"
+          else
+            echo "has_logs=false" >> $GITHUB_OUTPUT
+            echo "No logs downloaded"
+          fi
+
+      - name: Upload Logs to S3
+        id: upload_s3
+        if: ${{ steps.download_logs.outputs.has_logs == 'true' && secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.S3_LOGS_REGION }}
+        run: |
+          echo "Uploading logs to S3..."
+
+          # Generate S3 key matching pattern: PR{number}_ID{run_id}_{timestamp}.zip
+          # Example: PR2555_ID20245985754_20251217183045.zip
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          RUN_ID="${{ github.run_id }}"
+
+          # Try to extract PR number from run title or use 'Run' as fallback
+          PR_NUM="Run"
+          if [[ "${{ github.event.head_commit.message }}" =~ PR[[:space:]]*#?([0-9]+) ]]; then
+            PR_NUM="PR${BASH_REMATCH[1]}"
+          fi
+
+          S3_KEY="${PR_NUM}_ID${RUN_ID}_${TIMESTAMP}.zip"
+
+          # Upload to S3 using AWS CLI
+          python build_tools/upload_logs_to_s3.py \
+            --log-dir aggregated_logs \
+            --bucket "${{ env.S3_LOGS_BUCKET }}" \
+            --s3-key "$S3_KEY" \
+            --region "${{ env.S3_LOGS_REGION }}" \
+            2>&1
+
+          if [ $? -eq 0 ]; then
+            # Generate the HTTPS URL for the summary
+            S3_URL="https://${{ env.S3_LOGS_BUCKET }}.s3.${{ env.S3_LOGS_REGION }}.amazonaws.com/${S3_KEY}"
+            echo "s3_url=${S3_URL}" >> $GITHUB_OUTPUT
+            echo "✅ Logs uploaded to ${S3_URL}"
+          else
+            echo "❌ Failed to upload logs to S3"
+            echo "s3_url=" >> $GITHUB_OUTPUT
+          fi
 
       - name: Generate Consolidated Summary
         run: |
@@ -500,6 +669,7 @@ jobs:
           ANY_FAILED=false
           SDK_URLS=""
           RUN_IDS=""
+          RP_LAUNCH_URLS=""
 
           # Process each result file
           for result_file in results/*.json; do
@@ -510,6 +680,7 @@ jobs:
               SDK_URL=$(jq -r '.sdk_url // ""' "$result_file")
               RUN_ID=$(jq -r '.run_id // ""' "$result_file")
               HAS_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
+              RP_LAUNCH_URL=$(jq -r '.rp_launch_url // ""' "$result_file")
 
               # Format result with emoji
               if [ "$RESULT" = "SUCCESS" ]; then
@@ -554,13 +725,18 @@ jobs:
               if [ -n "$RUN_ID" ] && [[ ! "$RUN_IDS" =~ "$RUN_ID" ]]; then
                 RUN_IDS="${RUN_IDS}${RUN_ID}\n"
               fi
+
+              # Collect ReportPortal launch URLs with GPU tag context
+              if [ -n "$RP_LAUNCH_URL" ]; then
+                RP_LAUNCH_URLS="${RP_LAUNCH_URLS}${PLATFORM}/${GPU_TAG}|${RP_LAUNCH_URL}\n"
+              fi
             fi
           done
 
           # Add TheRock Run IDs section (for bump PRs)
           if [ -n "$RUN_IDS" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**TheRock Run IDs:**" >> $GITHUB_STEP_SUMMARY
+            echo "#### TheRock Run IDs" >> $GITHUB_STEP_SUMMARY
             echo -e "$RUN_IDS" | while read -r run_id; do
               if [ -n "$run_id" ]; then
                 echo "- [${run_id}](https://github.com/ROCm/TheRock/actions/runs/${run_id})" >> $GITHUB_STEP_SUMMARY
@@ -568,13 +744,34 @@ jobs:
             done
           fi
 
-          # Add SDK URLs section (for nightly builds)
-          if [ -n "$SDK_URLS" ]; then
+          # Add ReportPortal Launches section
+          if [ -n "$RP_LAUNCH_URLS" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
-            echo -e "$SDK_URLS" | while read -r url; do
+            echo "#### ReportPortal Launches" >> $GITHUB_STEP_SUMMARY
+            echo -e "$RP_LAUNCH_URLS" | while IFS='|' read -r label url; do
               if [ -n "$url" ]; then
-                echo "- ${url}" >> $GITHUB_STEP_SUMMARY
+                echo "- [${label}](${url})" >> $GITHUB_STEP_SUMMARY
               fi
             done
+          fi
+
+          # # Add SDK URLs section (for nightly builds)
+          # if [ -n "$SDK_URLS" ]; then
+          #   echo "" >> $GITHUB_STEP_SUMMARY
+          #   echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
+          #   echo -e "$SDK_URLS" | while read -r url; do
+          #     if [ -n "$url" ]; then
+          #       echo "- ${url}" >> $GITHUB_STEP_SUMMARY
+          #     fi
+          #   done
+          # fi
+
+          # Add S3 Logs section
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### S3 Logs" >> $GITHUB_STEP_SUMMARY
+          S3_URL="${{ steps.upload_s3.outputs.s3_url }}"
+          if [ -n "$S3_URL" ]; then
+            echo "📦 [Download aggregated logs](${S3_URL})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No logs available (ReportPortal or S3 credentials not configured)_" >> $GITHUB_STEP_SUMMARY
           fi
