@@ -190,7 +190,7 @@ jobs:
 
   # Matrix job that triggers each GPU target in parallel
   trigger-orchestrai:
-    name: Trigger OrchestrAI (${{ matrix.gpu_tag }})
+    name: Trigger OrchestrAI (${{ matrix.platform }}/${{ matrix.gpu_tag }})
     needs: preprocess
     runs-on: arc-lnx-pub
     environment: ucicd
@@ -384,7 +384,7 @@ jobs:
         run: |
           # Create a JSON file with this job's results for the consolidated summary
           mkdir -p results
-          cat > results/${{ matrix.gpu_tag }}.json << 'EOF'
+          cat > results/${{ matrix.platform }}-${{ matrix.gpu_tag }}.json << 'EOF'
           {
             "gpu_tag": "${{ matrix.gpu_tag }}",
             "platform": "${{ matrix.platform }}",
@@ -404,13 +404,13 @@ jobs:
             "unknown": "${{ steps.test_results.outputs.unknown }}"
           }
           EOF
-          echo "Saved results for ${{ matrix.gpu_tag }}"
+          echo "Saved results for ${{ matrix.platform }}/${{ matrix.gpu_tag }}"
 
       - name: Upload Results Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: orchestrai-results-${{ matrix.gpu_tag }}
-          path: results/${{ matrix.gpu_tag }}.json
+          name: orchestrai-results-${{ matrix.platform }}-${{ matrix.gpu_tag }}
+          path: results/${{ matrix.platform }}-${{ matrix.gpu_tag }}.json
           retention-days: 1
 
       - name: Write Job Summary
