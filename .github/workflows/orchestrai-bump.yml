@@ -57,8 +57,8 @@ jobs:
       UCICD_USER: ${{ secrets.UCICD_USER }}
       UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
       RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+      S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
 
   summary:
     name: Bump PR Summary
