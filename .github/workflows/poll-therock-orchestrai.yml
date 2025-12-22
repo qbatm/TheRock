@@ -29,6 +29,11 @@ on:
         required: false
         type: boolean
         default: false
+      force_trigger:
+        description: 'Force trigger even if already processed (may create duplicate runs)'
+        required: false
+        type: boolean
+        default: false
       platform:
         description: 'Platform filter (leave empty for all)'
         required: false
@@ -188,16 +193,23 @@ jobs:
 
           echo "Found $(echo "$BUMP_RUNS" | jq 'length') bump PR runs (searched $page page(s))"
 
-          # Filter out already processed runs
+          # Filter out already processed runs (unless force_trigger is enabled)
+          FORCE_TRIGGER="${{ inputs.force_trigger }}"
           FILTERED_BUMP_RUNS="[]"
           for run_id in $(echo "$BUMP_RUNS" | jq -r '.[]?.id // empty'); do
-            already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml")
-            if [ "$already_processed" = "false" ]; then
+            if [ "$FORCE_TRIGGER" = "true" ]; then
               run_json=$(echo "$BUMP_RUNS" | jq ".[] | select(.id == $run_id)")
               FILTERED_BUMP_RUNS=$(echo "$FILTERED_BUMP_RUNS" | jq ". + [$run_json]")
-              echo "  New bump PR run: $run_id"
+              echo "  Force triggering bump PR run: $run_id"
             else
-              echo "  Already processed: $run_id"
+              already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml")
+              if [ "$already_processed" = "false" ]; then
+                run_json=$(echo "$BUMP_RUNS" | jq ".[] | select(.id == $run_id)")
+                FILTERED_BUMP_RUNS=$(echo "$FILTERED_BUMP_RUNS" | jq ". + [$run_json]")
+                echo "  New bump PR run: $run_id"
+              else
+                echo "  Already processed: $run_id"
+              fi
             fi
           done
 
@@ -263,9 +275,24 @@ jobs:
 
           echo "Found $(echo "$NIGHTLY_RUNS" | jq 'length') nightly runs (searched $page page(s))"
 
-          # For nightly runs, we don't filter here because we trigger per-platform
-          # The deduplication check happens in the trigger phase per platform
-          FILTERED_NIGHTLY_RUNS="$NIGHTLY_RUNS"
+          # Filter out already processed nightly runs (unless force_trigger is enabled)
+          FILTERED_NIGHTLY_RUNS="[]"
+          for run_id in $(echo "$NIGHTLY_RUNS" | jq -r '.[]?.id // empty'); do
+            if [ "$FORCE_TRIGGER" = "true" ]; then
+              run_json=$(echo "$NIGHTLY_RUNS" | jq ".[] | select(.id == $run_id)")
+              FILTERED_NIGHTLY_RUNS=$(echo "$FILTERED_NIGHTLY_RUNS" | jq ". + [$run_json]")
+              echo "  Force triggering nightly run: $run_id"
+            else
+              already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml")
+              if [ "$already_processed" = "false" ]; then
+                run_json=$(echo "$NIGHTLY_RUNS" | jq ".[] | select(.id == $run_id)")
+                FILTERED_NIGHTLY_RUNS=$(echo "$FILTERED_NIGHTLY_RUNS" | jq ". + [$run_json]")
+                echo "  New nightly run: $run_id"
+              else
+                echo "  Already processed: $run_id"
+              fi
+            fi
+          done
           echo "Nightly runs to consider: $(echo "$FILTERED_NIGHTLY_RUNS" | jq 'length')"
 
 
@@ -338,8 +365,10 @@ jobs:
           # Get platform input - empty string means "all platforms"
           # This is passed to the downstream workflow which handles platform logic internally
           PLATFORM="${{ inputs.platform }}"
+          FORCE_TRIGGER="${{ inputs.force_trigger }}"
 
           echo "Platform filter: ${PLATFORM:-all}"
+          echo "Force trigger: ${FORCE_TRIGGER:-false}"
 
           # Decode the base64 encoded JSON
           BUMP_RUNS=$(echo "${{ steps.discover.outputs.bump_runs_b64 }}" | base64 -d)
@@ -363,10 +392,15 @@ jobs:
             head_sha=$(echo "$run" | jq -r '.head_sha')
 
             # Check if this run was already processed (single check, not per-platform)
-            already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml")
-            if [ "$already_processed" = "true" ]; then
-              echo "  Skipping orchestrai-bump for run $run_id - already processed"
-              continue
+            # Skip this check if force_trigger is enabled
+            if [ "$FORCE_TRIGGER" != "true" ]; then
+              already_processed=$(check_already_processed "$run_id" "orchestrai-bump.yml")
+              if [ "$already_processed" = "true" ]; then
+                echo "  Skipping orchestrai-bump for run $run_id - already processed"
+                continue
+              fi
+            else
+              echo "  Force triggering orchestrai-bump for run $run_id"
             fi
 
             # Try to get PR number from the commit SHA
@@ -427,10 +461,15 @@ jobs:
             head_sha=$(echo "$run" | jq -r '.head_sha')
 
             # Check if this run was already processed (single check, not per-platform)
-            already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml")
-            if [ "$already_processed" = "true" ]; then
-              echo "  Skipping orchestrai-nightly for run $run_id - already processed"
-              continue
+            # Skip this check if force_trigger is enabled
+            if [ "$FORCE_TRIGGER" != "true" ]; then
+              already_processed=$(check_already_processed "$run_id" "orchestrai-nightly.yml")
+              if [ "$already_processed" = "true" ]; then
+                echo "  Skipping orchestrai-nightly for run $run_id - already processed"
+                continue
+              fi
+            else
+              echo "  Force triggering orchestrai-nightly for run $run_id"
             fi
 
             echo "  Triggering orchestrai-nightly for run $run_id (platform: ${PLATFORM:-all})..."
@@ -474,6 +513,7 @@ jobs:
           echo "**Run Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
           echo "**Lookback:** ${{ inputs.lookback_hours || env.DEFAULT_LOOKBACK_HOURS }} hours" >> $GITHUB_STEP_SUMMARY
           echo "**Dry Run:** ${{ inputs.dry_run || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Force Trigger:** ${{ inputs.force_trigger || 'false' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Decode the base64 encoded JSON
