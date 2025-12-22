@@ -135,8 +135,7 @@ on:
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
-  # JENKINS_JOB_PATH: "job/ucicd-production-v1"
-  JENKINS_JOB_PATH: "job/DevOps/job/nm/job/actions-test/"
+  JENKINS_JOB_PATH: "job/ucicd-production-v1"
   REPORT_PORTAL_URL: "http://ucicd-reports-uat.amd.com:8080"
   REPORT_PORTAL_PROJECT: "ucicd_project_slim"
   S3_LOGS_BUCKET: "ucicd-therock"
