@@ -889,11 +889,11 @@ jobs:
           # echo "✅ Posted PR comment"
 
           # Post comment using gh api
-          # HARDCODED TO TEST PR
+          # HARDCODED FOR TESTING - posts to qbatm/TheRock PR #255
           echo "Creating new comment..."
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
-            "/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
+            "/repos/qbatm/TheRock/issues/255/comments" \
             -F body=@"$COMMENT_FILE"
           echo "✅ Posted PR comment"
