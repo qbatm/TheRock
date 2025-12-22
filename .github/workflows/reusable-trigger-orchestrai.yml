@@ -69,7 +69,7 @@ on:
         required: false
       S3_SECRET_KEY:
         required: false
-      THEROCK_GITHUB_TOKEN:
+      THEROCK_TOKEN:
         required: false
   workflow_dispatch:
     inputs:
@@ -713,7 +713,7 @@ jobs:
 
       - name: Write Summary and Post PR Comment
         env:
-          GH_TOKEN: ${{ secrets.THEROCK_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.THEROCK_TOKEN }}
           S3_URL: ${{ steps.upload_s3.outputs.s3_url }}
           PR_NUMBER: ${{ inputs.pr_number }}
           PR_REPO: ${{ inputs.pr_repo }}
@@ -848,7 +848,7 @@ jobs:
           fi
 
           if [ -z "$GH_TOKEN" ]; then
-            echo "⚠️ THEROCK_GITHUB_TOKEN not configured, skipping PR comment"
+            echo "⚠️ THEROCK_TOKEN not configured, skipping PR comment"
             exit 0
           fi
 
