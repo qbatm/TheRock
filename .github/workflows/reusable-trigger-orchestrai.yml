@@ -589,13 +589,28 @@ jobs:
 
       - name: Download All Results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
         with:
           pattern: orchestrai-results-*
           path: results
           merge-multiple: true
 
+      - name: Check Results
+        id: check_results
+        run: |
+          if [ -d results ] && [ -n "$(ls -A results 2>/dev/null)" ]; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+            echo "✅ Found result files:"
+            ls -la results/
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No result files found (matrix jobs may not have completed)"
+            mkdir -p results
+          fi
+
       - name: Download Logs from ReportPortal
         id: download_logs
+        if: ${{ steps.check_results.outputs.has_results == 'true' }}
         env:
           RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
           REPORT_PORTAL_URL: ${{ env.REPORT_PORTAL_URL }}
@@ -888,12 +903,21 @@ jobs:
           #   -F body=@"$COMMENT_FILE"
           # echo "✅ Posted PR comment"
 
-          # Post comment using gh api
+          # Post comment using curl (gh CLI may not be available on custom runners)
           # HARDCODED FOR TESTING - posts to qbatm/TheRock PR #255
           echo "Creating new comment..."
-          gh api \
-            --method POST \
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "/repos/qbatm/TheRock/issues/255/comments" \
-            -F body=@"$COMMENT_FILE"
-          echo "✅ Posted PR comment"
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/qbatm/TheRock/issues/255/comments" \
+            -d "$(jq -n --rawfile body "$COMMENT_FILE" '{body: $body}')")
+
+          if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
+            COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+            echo "✅ Posted PR comment: ${COMMENT_URL}"
+          else
+            echo "❌ Failed to post PR comment"
+            echo "$RESPONSE"
+            exit 1
+          fi
