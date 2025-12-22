@@ -42,7 +42,7 @@ on:
         description: 'Skip writing individual job summaries (only write consolidated summary)'
         required: false
         type: boolean
-        default: false
+        default: true
       post_pr_comment:
         description: 'Post results as a comment on the associated PR'
         required: false
@@ -116,7 +116,7 @@ on:
         description: 'Skip writing individual job summaries (only write consolidated summary)'
         required: false
         type: boolean
-        default: false
+        default: true
       post_pr_comment:
         description: 'Post results as a comment on the associated PR'
         required: false
@@ -868,7 +868,8 @@ jobs:
           cat > "$COMMENT_FILE" << 'EOF'
           ## OrchestrAI Test Results Summary
 
-          **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          # TODO: Commented out for now, useful for debug.
+          # **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
           EOF
 
