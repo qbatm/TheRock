@@ -772,7 +772,23 @@ jobs:
                 RP_LAUNCH_URL=$(jq -r '.rp_launch_url // ""' "$result_file")
 
                 # Format result with emoji
-                if [ "$RESULT" = "SUCCESS" ]; then
+                # TODO: Hardcoded - if 0 tests were run, ignore downstream result and show as skipped
+                if [ "$HAS_TEST_RESULTS" = "true" ]; then
+                  TOTAL_CHECK=$(jq -r '.total_tests // "0"' "$result_file")
+                  if [ "$TOTAL_CHECK" = "0" ] || [ "$TOTAL_CHECK" = "-" ] || [ "$TOTAL_CHECK" = "N/A" ]; then
+                    RESULT_DISPLAY="⏭️ SKIPPED"
+                  elif [ "$RESULT" = "SUCCESS" ]; then
+                    RESULT_DISPLAY="✅ SUCCESS"
+                  elif [ "$RESULT" = "FAILURE" ]; then
+                    RESULT_DISPLAY="❌ FAILURE"
+                  elif [ "$RESULT" = "TIMEOUT" ]; then
+                    RESULT_DISPLAY="⏱️ TIMEOUT"
+                  elif [ "$RESULT" = "ERROR" ]; then
+                    RESULT_DISPLAY="💥 ERROR"
+                  else
+                    RESULT_DISPLAY="⚠️ ${RESULT}"
+                  fi
+                elif [ "$RESULT" = "SUCCESS" ]; then
                   RESULT_DISPLAY="✅ SUCCESS"
                 elif [ "$RESULT" = "FAILURE" ]; then
                   RESULT_DISPLAY="❌ FAILURE"
