@@ -43,6 +43,21 @@ on:
         required: false
         type: boolean
         default: false
+      post_pr_comment:
+        description: 'Post results as a comment on the associated PR'
+        required: false
+        type: boolean
+        default: false
+      pr_number:
+        description: 'PR number to post comment to (required if post_pr_comment is true)'
+        required: false
+        type: string
+        default: ''
+      pr_repo:
+        description: 'Repository for PR comment (owner/repo format, defaults to ROCm/TheRock)'
+        required: false
+        type: string
+        default: 'ROCm/TheRock'
     secrets:
       UCICD_USER:
         required: true
@@ -53,6 +68,8 @@ on:
       S3_ACCESS_KEY:
         required: false
       S3_SECRET_KEY:
+        required: false
+      THEROCK_GITHUB_TOKEN:
         required: false
   workflow_dispatch:
     inputs:
@@ -100,6 +117,21 @@ on:
         required: false
         type: boolean
         default: false
+      post_pr_comment:
+        description: 'Post results as a comment on the associated PR'
+        required: false
+        type: boolean
+        default: false
+      pr_number:
+        description: 'PR number to post comment to'
+        required: false
+        type: string
+        default: ''
+      pr_repo:
+        description: 'Repository for PR comment (owner/repo format)'
+        required: false
+        type: string
+        default: 'ROCm/TheRock'
 
 env:
   JENKINS_URL: "https://ucicd-jenkins.amd.com"
@@ -679,128 +711,189 @@ jobs:
             echo "s3_url=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate Consolidated Summary
+      - name: Write Summary and Post PR Comment
+        env:
+          GH_TOKEN: ${{ secrets.THEROCK_GITHUB_TOKEN }}
+          S3_URL: ${{ steps.upload_s3.outputs.s3_url }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_REPO: ${{ inputs.pr_repo }}
+          POST_PR_COMMENT: ${{ inputs.post_pr_comment }}
         run: |
-          echo "### OrchestrAI Test Results Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          # Generate summary content
+          SUMMARY_FILE="summary_content.md"
+          HAS_RESULTS="false"
 
           # Check if we have any results
           if [ ! -d results ] || [ -z "$(ls -A results 2>/dev/null)" ]; then
-            echo "_No test results available_" >> $GITHUB_STEP_SUMMARY
+            echo "_No test results available_" > "$SUMMARY_FILE"
+          else
+            HAS_RESULTS="true"
+
+            # Create the table header
+            echo "| GPU Target | Platform | Result | Total Tests | Passed | Failed | Skipped | Error | Unknown |" > "$SUMMARY_FILE"
+            echo "|------------|----------|--------|-------------|--------|--------|---------|-------|---------|" >> "$SUMMARY_FILE"
+
+            # Track additional info
+            RUN_IDS=""
+            RP_LAUNCH_URLS=""
+
+            # Process each result file
+            for result_file in results/*.json; do
+              if [ -f "$result_file" ]; then
+                GPU_TAG=$(jq -r '.gpu_tag // "N/A"' "$result_file")
+                PLATFORM=$(jq -r '.platform // "N/A"' "$result_file")
+                RESULT=$(jq -r '.result // "UNKNOWN"' "$result_file")
+                RUN_ID=$(jq -r '.run_id // ""' "$result_file")
+                HAS_TEST_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
+                RP_LAUNCH_URL=$(jq -r '.rp_launch_url // ""' "$result_file")
+
+                # Format result with emoji
+                if [ "$RESULT" = "SUCCESS" ]; then
+                  RESULT_DISPLAY="✅ SUCCESS"
+                elif [ "$RESULT" = "FAILURE" ]; then
+                  RESULT_DISPLAY="❌ FAILURE"
+                elif [ "$RESULT" = "TIMEOUT" ]; then
+                  RESULT_DISPLAY="⏱️ TIMEOUT"
+                elif [ "$RESULT" = "ERROR" ]; then
+                  RESULT_DISPLAY="💥 ERROR"
+                else
+                  RESULT_DISPLAY="⚠️ ${RESULT}"
+                fi
+
+                # GPU tag with RP link (used for both summary and PR comment)
+                if [ -n "$RP_LAUNCH_URL" ]; then
+                  GPU_TAG_DISPLAY="[${GPU_TAG}](${RP_LAUNCH_URL})"
+                else
+                  GPU_TAG_DISPLAY="${GPU_TAG}"
+                fi
+
+                if [ "$HAS_TEST_RESULTS" = "true" ]; then
+                  TOTAL=$(jq -r '.total_tests // "-"' "$result_file")
+                  PASSED=$(jq -r '.passed // "-"' "$result_file")
+                  FAILED=$(jq -r '.failed // "-"' "$result_file")
+                  SKIPPED=$(jq -r '.skipped // "-"' "$result_file")
+                  ERROR=$(jq -r '.error // "-"' "$result_file")
+                  UNKNOWN=$(jq -r '.unknown // "-"' "$result_file")
+                else
+                  TOTAL="-"
+                  PASSED="-"
+                  FAILED="-"
+                  SKIPPED="-"
+                  ERROR="-"
+                  UNKNOWN="-"
+                fi
+
+                # Add table row
+                echo "| ${GPU_TAG_DISPLAY} | ${PLATFORM} | ${RESULT_DISPLAY} | ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${ERROR} | ${UNKNOWN} |" >> "$SUMMARY_FILE"
+
+                # Collect unique Run IDs
+                if [ -n "$RUN_ID" ] && [[ ! "$RUN_IDS" =~ "$RUN_ID" ]]; then
+                  RUN_IDS="${RUN_IDS}${RUN_ID}\n"
+                fi
+
+                # Collect ReportPortal launch URLs with GPU tag context
+                if [ -n "$RP_LAUNCH_URL" ]; then
+                  RP_LAUNCH_URLS="${RP_LAUNCH_URLS}${PLATFORM}/${GPU_TAG}|${RP_LAUNCH_URL}\n"
+                fi
+              fi
+            done
+
+            # Save collected data
+            echo -e "$RUN_IDS" > run_ids.txt
+            echo -e "$RP_LAUNCH_URLS" > rp_urls.txt
+          fi
+
+          # === Write Step Summary ===
+          echo "### OrchestrAI Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat "$SUMMARY_FILE" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$HAS_RESULTS" = "true" ]; then
+            # Add TheRock Run IDs section (for bump PRs)
+            if [ -f run_ids.txt ] && [ -s run_ids.txt ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "#### TheRock Run IDs" >> $GITHUB_STEP_SUMMARY
+              while read -r run_id; do
+                if [ -n "$run_id" ]; then
+                  echo "- [${run_id}](https://github.com/ROCm/TheRock/actions/runs/${run_id})" >> $GITHUB_STEP_SUMMARY
+                fi
+              done < run_ids.txt
+            fi
+
+            # Add ReportPortal Launches section
+            if [ -f rp_urls.txt ] && [ -s rp_urls.txt ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "#### ReportPortal Launches" >> $GITHUB_STEP_SUMMARY
+              while IFS='|' read -r label url; do
+                if [ -n "$url" ]; then
+                  echo "- [${label}](${url})" >> $GITHUB_STEP_SUMMARY
+                fi
+              done < rp_urls.txt
+            fi
+
+            # Add S3 Logs section
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### S3 Logs" >> $GITHUB_STEP_SUMMARY
+            if [ -n "$S3_URL" ]; then
+              echo "📦 [Download aggregated logs](${S3_URL})" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "_No logs available (ReportPortal or S3 credentials not configured)_" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          # === Post PR Comment ===
+          if [ "$POST_PR_COMMENT" != "true" ] || [ -z "$PR_NUMBER" ]; then
+            echo "Skipping PR comment (post_pr_comment=$POST_PR_COMMENT, pr_number=$PR_NUMBER)"
             exit 0
           fi
 
-          # Create the table header
-          echo "| GPU Target | Platform | Result | Total Tests | Passed | Failed | Skipped | Error | Unknown |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|----------|--------|-------------|--------|--------|---------|-------|---------|" >> $GITHUB_STEP_SUMMARY
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠️ THEROCK_GITHUB_TOKEN not configured, skipping PR comment"
+            exit 0
+          fi
 
-          # Track overall status
-          ANY_FAILED=false
-          SDK_URLS=""
-          RUN_IDS=""
-          RP_LAUNCH_URLS=""
+          echo "Posting results to PR #${PR_NUMBER} in ${PR_REPO}..."
 
-          # Process each result file
-          for result_file in results/*.json; do
-            if [ -f "$result_file" ]; then
-              GPU_TAG=$(jq -r '.gpu_tag // "N/A"' "$result_file")
-              PLATFORM=$(jq -r '.platform // "N/A"' "$result_file")
-              RESULT=$(jq -r '.result // "UNKNOWN"' "$result_file")
-              SDK_URL=$(jq -r '.sdk_url // ""' "$result_file")
-              RUN_ID=$(jq -r '.run_id // ""' "$result_file")
-              HAS_RESULTS=$(jq -r '.has_results // "false"' "$result_file")
-              RP_LAUNCH_URL=$(jq -r '.rp_launch_url // ""' "$result_file")
+          # Build the comment body file (same content as step summary)
+          COMMENT_FILE="pr_comment.md"
+          cat > "$COMMENT_FILE" << 'EOF'
+          ## 🤖 OrchestrAI Test Results
 
-              # Format result with emoji
-              if [ "$RESULT" = "SUCCESS" ]; then
-                RESULT_DISPLAY="✅ SUCCESS"
-              elif [ "$RESULT" = "FAILURE" ]; then
-                RESULT_DISPLAY="❌ FAILURE"
-                ANY_FAILED=true
-              elif [ "$RESULT" = "TIMEOUT" ]; then
-                RESULT_DISPLAY="⏱️ TIMEOUT"
-                ANY_FAILED=true
-              elif [ "$RESULT" = "ERROR" ]; then
-                RESULT_DISPLAY="💥 ERROR"
-                ANY_FAILED=true
-              else
-                RESULT_DISPLAY="⚠️ ${RESULT}"
-              fi
+          **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-              if [ "$HAS_RESULTS" = "true" ]; then
-                TOTAL=$(jq -r '.total_tests // "N/A"' "$result_file")
-                PASSED=$(jq -r '.passed // "N/A"' "$result_file")
-                FAILED=$(jq -r '.failed // "N/A"' "$result_file")
-                SKIPPED=$(jq -r '.skipped // "N/A"' "$result_file")
-                ERROR=$(jq -r '.error // "N/A"' "$result_file")
-                UNKNOWN=$(jq -r '.unknown // "N/A"' "$result_file")
-              else
-                TOTAL="-"
-                PASSED="-"
-                FAILED="-"
-                SKIPPED="-"
-                ERROR="-"
-                UNKNOWN="-"
-              fi
+          EOF
 
-              echo "| ${GPU_TAG} | ${PLATFORM} | ${RESULT_DISPLAY} | ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} | ${ERROR} | ${UNKNOWN} |" >> $GITHUB_STEP_SUMMARY
+          # Add the same table
+          cat "$SUMMARY_FILE" >> "$COMMENT_FILE"
 
-              # Collect unique SDK URLs
-              if [ -n "$SDK_URL" ] && [[ ! "$SDK_URLS" =~ "$SDK_URL" ]]; then
-                SDK_URLS="${SDK_URLS}${SDK_URL}\n"
-              fi
-
-              # Collect unique Run IDs
-              if [ -n "$RUN_ID" ] && [[ ! "$RUN_IDS" =~ "$RUN_ID" ]]; then
-                RUN_IDS="${RUN_IDS}${RUN_ID}\n"
-              fi
-
-              # Collect ReportPortal launch URLs with GPU tag context
-              if [ -n "$RP_LAUNCH_URL" ]; then
-                RP_LAUNCH_URLS="${RP_LAUNCH_URLS}${PLATFORM}/${GPU_TAG}|${RP_LAUNCH_URL}\n"
-              fi
+          if [ "$HAS_RESULTS" = "true" ]; then
+            # Add S3 logs link if available
+            if [ -n "$S3_URL" ]; then
+              echo "" >> "$COMMENT_FILE"
+              echo "📦 [Download aggregated logs](${S3_URL})" >> "$COMMENT_FILE"
             fi
-          done
-
-          # Add TheRock Run IDs section (for bump PRs)
-          if [ -n "$RUN_IDS" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "#### TheRock Run IDs" >> $GITHUB_STEP_SUMMARY
-            echo -e "$RUN_IDS" | while read -r run_id; do
-              if [ -n "$run_id" ]; then
-                echo "- [${run_id}](https://github.com/ROCm/TheRock/actions/runs/${run_id})" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
           fi
 
-          # Add ReportPortal Launches section
-          if [ -n "$RP_LAUNCH_URLS" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "#### ReportPortal Launches" >> $GITHUB_STEP_SUMMARY
-            echo -e "$RP_LAUNCH_URLS" | while IFS='|' read -r label url; do
-              if [ -n "$url" ]; then
-                echo "- [${label}](${url})" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
-          fi
+          # Add footer
+          echo "" >> "$COMMENT_FILE"
+          echo "---" >> "$COMMENT_FILE"
+          echo "<sub>Posted by OrchestrAI workflow</sub>" >> "$COMMENT_FILE"
 
-          # # Add SDK URLs section (for nightly builds)
-          # if [ -n "$SDK_URLS" ]; then
-          #   echo "" >> $GITHUB_STEP_SUMMARY
-          #   echo "**SDK URLs:**" >> $GITHUB_STEP_SUMMARY
-          #   echo -e "$SDK_URLS" | while read -r url; do
-          #     if [ -n "$url" ]; then
-          #       echo "- ${url}" >> $GITHUB_STEP_SUMMARY
-          #     fi
-          #   done
-          # fi
+          # # Post comment using gh api
+          # echo "Creating new comment..."
+          # gh api \
+          #   --method POST \
+          #   -H "Accept: application/vnd.github+json" \
+          #   "/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
+          #   -F body=@"$COMMENT_FILE"
+          # echo "✅ Posted PR comment"
 
-          # Add S3 Logs section
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "#### S3 Logs" >> $GITHUB_STEP_SUMMARY
-          S3_URL="${{ steps.upload_s3.outputs.s3_url }}"
-          if [ -n "$S3_URL" ]; then
-            echo "📦 [Download aggregated logs](${S3_URL})" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "_No logs available (ReportPortal or S3 credentials not configured)_" >> $GITHUB_STEP_SUMMARY
-          fi
+          # Post comment using gh api
+          # HARDCODED TO TEST PR
+          echo "Creating new comment..."
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
+            -F body=@"$COMMENT_FILE"
+          echo "✅ Posted PR comment"

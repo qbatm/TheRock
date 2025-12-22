@@ -369,7 +369,18 @@ jobs:
               continue
             fi
 
-            echo "  Triggering orchestrai-bump for run $run_id (platform: ${PLATFORM:-all})..."
+            # Try to get PR number from the commit SHA
+            PR_NUMBER=""
+            PR_SEARCH=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "${GITHUB_API}/repos/${{ env.THEROCK_REPO }}/commits/${head_sha}/pulls" 2>/dev/null || echo "[]")
+            if [ -n "$PR_SEARCH" ] && [ "$PR_SEARCH" != "[]" ]; then
+              PR_NUMBER=$(echo "$PR_SEARCH" | jq -r '.[0].number // empty')
+              echo "  Found PR #${PR_NUMBER} for commit ${head_sha}"
+            fi
+
+            echo "  Triggering orchestrai-bump for run $run_id (platform: ${PLATFORM:-all}, PR: ${PR_NUMBER:-none})..."
 
             # Trigger ONE workflow per run - it handles all platforms internally
             RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
@@ -384,7 +395,8 @@ jobs:
                   \"run_title\": \"${run_title}\",
                   \"run_conclusion\": \"${run_conclusion}\",
                   \"head_sha\": \"${head_sha}\",
-                  \"platform\": \"${PLATFORM}\"
+                  \"platform\": \"${PLATFORM}\",
+                  \"pr_number\": \"${PR_NUMBER}\"
                 }
               }")
 
@@ -393,7 +405,7 @@ jobs:
 
             if [ "$HTTP_CODE" = "204" ]; then
               echo "    ✅ Triggered successfully"
-              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"${PLATFORM:-all}\", \"status\": \"triggered\"}]")
+              TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"${PLATFORM:-all}\", \"pr_number\": \"${PR_NUMBER}\", \"status\": \"triggered\"}]")
             else
               echo "    ❌ Failed to trigger (HTTP $HTTP_CODE): $BODY"
               TRIGGERED_BUMP=$(echo "$TRIGGERED_BUMP" | jq ". + [{\"run_id\": \"$run_id\", \"platform\": \"${PLATFORM:-all}\", \"status\": \"failed\", \"error\": \"HTTP $HTTP_CODE\"}]")

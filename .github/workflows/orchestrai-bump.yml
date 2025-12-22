@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: ''
+      pr_number:
+        description: 'PR number to post results comment to'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   trigger-orchestrai:
@@ -53,12 +58,15 @@ jobs:
       platform: ${{ inputs.platform }}
       run_id: ${{ inputs.run_id }}
       head_sha: ${{ inputs.head_sha }}
+      post_pr_comment: ${{ inputs.pr_number != '' }}
+      pr_number: ${{ inputs.pr_number }}
     secrets:
       UCICD_USER: ${{ secrets.UCICD_USER }}
       UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
       RP_API_TOKEN: ${{ secrets.RP_API_TOKEN }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
       S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+      THEROCK_GITHUB_TOKEN: ${{ secrets.THEROCK_GITHUB_TOKEN }}
 
   summary:
     name: Bump PR Summary
