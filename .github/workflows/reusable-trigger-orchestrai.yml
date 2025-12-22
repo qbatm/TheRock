@@ -541,6 +541,7 @@ jobs:
     needs: [preprocess, trigger-orchestrai]
     if: always()
     runs-on: arc-lnx-pub
+    environment: ucicd
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -552,7 +553,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install requests
+          pip install requests boto3
 
       - name: Download All Results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -575,16 +576,27 @@ jobs:
             exit 0
           fi
 
+          echo "✅ RP_API_TOKEN is configured"
           echo "Downloading logs from ReportPortal..."
           mkdir -p aggregated_logs
+
+          # Debug: List result files
+          echo "Result files found:"
+          ls -la results/ || echo "No results directory"
 
           # Process each result file to get RP launch info
           for result_file in results/*.json; do
             if [ -f "$result_file" ]; then
+              echo "Processing: $result_file"
+              cat "$result_file"
+
               GPU_TAG=$(jq -r '.gpu_tag // ""' "$result_file")
               PLATFORM=$(jq -r '.platform // ""' "$result_file")
               RP_LAUNCH_NAME=$(jq -r '.rp_launch_name // ""' "$result_file")
               RP_LAUNCH_ID=$(jq -r '.rp_launch_id // ""' "$result_file")
+
+              echo "  GPU_TAG: $GPU_TAG, PLATFORM: $PLATFORM"
+              echo "  RP_LAUNCH_ID: $RP_LAUNCH_ID, RP_LAUNCH_NAME: $RP_LAUNCH_NAME"
 
               # Prefer launch ID (scraped from Jenkins summary) over launch name
               if [ -n "$RP_LAUNCH_ID" ]; then
@@ -606,25 +618,29 @@ jobs:
           done
 
           # Check if we downloaded any logs
+          echo "Checking aggregated_logs directory..."
+          ls -laR aggregated_logs/ 2>/dev/null || echo "aggregated_logs is empty or doesn't exist"
+
           if [ -d aggregated_logs ] && [ -n "$(find aggregated_logs -type f 2>/dev/null)" ]; then
             echo "has_logs=true" >> $GITHUB_OUTPUT
             LOG_COUNT=$(find aggregated_logs -type f | wc -l)
-            echo "Downloaded ${LOG_COUNT} log files"
+            echo "✅ Downloaded ${LOG_COUNT} log files"
           else
             echo "has_logs=false" >> $GITHUB_OUTPUT
-            echo "No logs downloaded"
+            echo "⚠️ No logs downloaded"
           fi
 
       - name: Upload Logs to S3
         id: upload_s3
-        if: ${{ steps.download_logs.outputs.has_logs == 'true' }}
+        if: ${{ always() && steps.download_logs.outputs.has_logs == 'true' }}
         env:
-          S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
-          S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+          # Map secret names to standard AWS environment variable names
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
           AWS_DEFAULT_REGION: ${{ env.S3_LOGS_REGION }}
         run: |
           # Skip if AWS credentials are not configured
-          if [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
             echo "⚠️ AWS credentials not configured, skipping S3 upload"
             echo "s3_url=" >> $GITHUB_OUTPUT
             exit 0
