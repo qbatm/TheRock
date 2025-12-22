@@ -883,10 +883,6 @@ jobs:
           COMMENT_FILE="pr_comment.md"
           cat > "$COMMENT_FILE" << 'EOF'
           ## OrchestrAI Test Results Summary
-
-          # TODO: Commented out for now, useful for debug.
-          # **Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
           EOF
 
           # Add the same table
