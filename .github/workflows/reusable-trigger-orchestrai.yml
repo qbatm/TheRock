@@ -60,9 +60,9 @@ on:
         default: 'ROCm/TheRock'
     secrets:
       UCICD_USER:
-        required: true
+        required: false
       UCICD_TOKEN:
-        required: true
+        required: false
       RP_API_TOKEN:
         required: false
       S3_ACCESS_KEY:
