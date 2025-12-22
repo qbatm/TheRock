@@ -651,12 +651,14 @@ jobs:
                 python build_tools/download_rp_logs.py \
                   --launch-id "$RP_LAUNCH_ID" \
                   --output "aggregated_logs/${PLATFORM}_${GPU_TAG}" \
+                  --debug \
                   2>&1 || echo "⚠️ Failed to download logs for launch ID ${RP_LAUNCH_ID}"
               elif [ -n "$RP_LAUNCH_NAME" ]; then
                 echo "Downloading logs for ${PLATFORM}/${GPU_TAG} (launch name: ${RP_LAUNCH_NAME})..."
                 python build_tools/download_rp_logs.py \
                   --launch-name "$RP_LAUNCH_NAME" \
                   --output "aggregated_logs/${PLATFORM}_${GPU_TAG}" \
+                  --debug \
                   2>&1 || echo "⚠️ Failed to download logs for ${RP_LAUNCH_NAME}"
               else
                 echo "⚠️ No ReportPortal launch info for ${PLATFORM}/${GPU_TAG}"
@@ -668,13 +670,20 @@ jobs:
           echo "Checking aggregated_logs directory..."
           ls -laR aggregated_logs/ 2>/dev/null || echo "aggregated_logs is empty or doesn't exist"
 
-          if [ -d aggregated_logs ] && [ -n "$(find aggregated_logs -type f 2>/dev/null)" ]; then
+          # Count files (excluding directories)
+          FILE_COUNT=$(find aggregated_logs -type f 2>/dev/null | wc -l)
+          echo "Found ${FILE_COUNT} files in aggregated_logs"
+
+          # Also check for non-empty directories as a fallback
+          DIR_COUNT=$(find aggregated_logs -mindepth 1 -type d 2>/dev/null | wc -l)
+          echo "Found ${DIR_COUNT} subdirectories in aggregated_logs"
+
+          if [ "$FILE_COUNT" -gt 0 ]; then
             echo "has_logs=true" >> $GITHUB_OUTPUT
-            LOG_COUNT=$(find aggregated_logs -type f | wc -l)
-            echo "✅ Downloaded ${LOG_COUNT} log files"
+            echo "✅ Downloaded ${FILE_COUNT} log files"
           else
             echo "has_logs=false" >> $GITHUB_OUTPUT
-            echo "⚠️ No logs downloaded"
+            echo "⚠️ No log files downloaded (directories may exist but are empty)"
           fi
 
       - name: Upload Logs to S3

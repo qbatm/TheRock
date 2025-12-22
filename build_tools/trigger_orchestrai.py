@@ -38,12 +38,12 @@ GPU_MAPPING = {
         # "gpu_navi44xt"      # AMD Radeon RX 9060 XT - gfx1200
     ],
     # TODO: Uncomment
-    # "gfx110X-all": [
-    #     "gpu_navi3x",
-    # ],
-    # "gfx1151": [
-    #     "igpu_stxh",
-    # ]
+    "gfx110X-all": [
+        "gpu_navi3x",
+    ],
+    "gfx1151": [
+        "igpu_stxh",
+    ]
     # Uncomment and expand as needed:
     # "gfx110X-dgpu": [
     #     "gpu_navi31xtx",    # AMD Radeon RX 7900 XTX - gfx1100
