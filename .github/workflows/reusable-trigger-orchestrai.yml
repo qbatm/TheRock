@@ -911,15 +911,6 @@ jobs:
           echo "---" >> "$COMMENT_FILE"
           echo "<sub>Posted by OrchestrAI workflow</sub>" >> "$COMMENT_FILE"
 
-          # # Post comment using gh api
-          # echo "Creating new comment..."
-          # gh api \
-          #   --method POST \
-          #   -H "Accept: application/vnd.github+json" \
-          #   "/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
-          #   -F body=@"$COMMENT_FILE"
-          # echo "✅ Posted PR comment"
-
           # Post comment using curl (gh CLI may not be available on custom runners)
           echo "Creating new comment..."
           echo "Creating comment on repo ${PR_REPO}, PR #${PR_NUMBER}"
@@ -927,7 +918,7 @@ jobs:
             -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
-            "https://api.github.com/repos/qbatm/TheRock/issues/255/comments" \
+                "https://api.github.com/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
             -d "$(jq -n --rawfile body "$COMMENT_FILE" '{body: $body}')")
 
           if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
