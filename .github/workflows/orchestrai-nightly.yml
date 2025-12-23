@@ -1,5 +1,5 @@
 name: OrchestrAI - Nightly Build
-run-name: "OrchestrAI Nightly - Run ${{ inputs.run_id }} (${{ inputs.platform }})"
+run-name: "OrchestrAI Nightly - Run ${{ inputs.run_id }}${{ inputs.platform && format(' ({0})', inputs.platform) || '' }}"
 
 # This workflow is triggered by poll-therock-orchestrai.yml when a new nightly build
 # is discovered from ROCm/TheRock. It uses the reusable-trigger-orchestrai.yml
@@ -7,6 +7,10 @@ run-name: "OrchestrAI Nightly - Run ${{ inputs.run_id }} (${{ inputs.platform }}
 #
 # For nightly builds, we use S3 URL lookup (no run_id) and pass the SDK URL
 # to Jenkins for installation.
+#
+# This workflow handles all platforms internally. If no platform is specified,
+# it will run tests for both linux and windows. The platform input can be used
+# to filter to a specific platform when needed.
 
 on:
   workflow_dispatch:
@@ -36,13 +40,10 @@ on:
         type: string
         default: ''
       platform:
-        description: 'Platform to trigger (linux or windows)'
+        description: 'Platform filter (leave empty for all platforms)'
         required: false
-        type: choice
-        options:
-          - linux
-          - windows
-        default: linux
+        type: string
+        default: ''
 
 jobs:
   trigger-orchestrai:
@@ -54,9 +55,7 @@ jobs:
       # The reusable workflow will use S3 lookup to find the SDK URL
       head_sha: ${{ inputs.head_sha }}
       run_id: ''
-    secrets:
-      UCICD_USER: ${{ secrets.UCICD_USER }}
-      UCICD_TOKEN: ${{ secrets.UCICD_TOKEN }}
+    secrets: inherit
 
   summary:
     name: Nightly Build Summary
