@@ -37,7 +37,6 @@ GPU_MAPPING = {
         # "gpu_navi44xl",     # AMD Radeon RX 9060 - gfx1200
         # "gpu_navi44xt"      # AMD Radeon RX 9060 XT - gfx1200
     ],
-    # TODO: Uncomment
     "gfx110X-all": [
         "gpu_navi3x",
     ],

@@ -54,6 +54,11 @@ on:
         required: false
         type: string
         default: 'ROCm/TheRock'
+      post_pr_comment:
+        description: 'Whether to post a comment to the PR with the results'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   trigger-orchestrai:
@@ -63,7 +68,7 @@ jobs:
       platform: ${{ inputs.platform }}
       run_id: ${{ inputs.run_id }}
       head_sha: ${{ inputs.head_sha }}
-      post_pr_comment: ${{ inputs.pr_number != '' }}
+      post_pr_comment: ${{ inputs.post_pr_comment }}
       pr_number: ${{ inputs.pr_number }}
       pr_repo: ${{ inputs.pr_repo }}
     secrets: inherit
