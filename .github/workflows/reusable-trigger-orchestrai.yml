@@ -911,21 +911,25 @@ jobs:
           echo "---" >> "$COMMENT_FILE"
           echo "<sub>Posted by OrchestrAI workflow</sub>" >> "$COMMENT_FILE"
 
-          # Post comment using curl (gh CLI may not be available on custom runners)
-          echo "Creating new comment..."
+          # Post comment using curl with retry (gh CLI may not be available on custom runners)
           echo "Creating comment on repo ${PR_REPO}, PR #${PR_NUMBER}"
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: token ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-                "https://api.github.com/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
-            -d "$(jq -n --rawfile body "$COMMENT_FILE" '{body: $body}')")
+          for attempt in 1 2 3; do
+            RESPONSE=$(curl -s -X POST \
+              -H "Authorization: token ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/${PR_REPO}/issues/${PR_NUMBER}/comments" \
+              -d "$(jq -n --rawfile body "$COMMENT_FILE" '{body: $body}')")
 
-          if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
-            COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
-            echo "✅ Posted PR comment: ${COMMENT_URL}"
-          else
-            echo "❌ Failed to post PR comment"
-            echo "$RESPONSE"
-            exit 1
-          fi
+            if echo "$RESPONSE" | jq -e '.id' > /dev/null 2>&1; then
+              echo "✅ Posted PR comment: $(echo "$RESPONSE" | jq -r '.html_url')"
+              exit 0
+            fi
+
+            echo "⚠️ Attempt ${attempt}/3 failed, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "❌ Failed to post PR comment after 3 attempts"
+          echo "$RESPONSE"
+          exit 1
