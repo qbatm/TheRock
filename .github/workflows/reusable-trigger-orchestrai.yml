@@ -570,7 +570,7 @@ jobs:
   consolidated-summary:
     name: Consolidated Summary
     needs: [preprocess, trigger-orchestrai]
-    if: always()
+    if: ${{ always() && !cancelled() }}
     runs-on: arc-lnx-pub
     environment: ucicd
     steps:
