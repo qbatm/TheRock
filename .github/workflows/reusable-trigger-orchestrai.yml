@@ -921,8 +921,8 @@ jobs:
           # echo "✅ Posted PR comment"
 
           # Post comment using curl (gh CLI may not be available on custom runners)
-          # HARDCODED FOR TESTING - posts to qbatm/TheRock PR #255
           echo "Creating new comment..."
+          echo "Creating comment on repo ${PR_REPO}, PR #${PR_NUMBER}"
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
