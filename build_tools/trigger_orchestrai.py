@@ -183,6 +183,11 @@ def build_builds_json(
     # Add amdgpu_family if provided
     if amdgpu_family:
         payload["use_case"]["the_rock"]["amdgpu_family"] = amdgpu_family
+        # Add therock_requirements_txt based on amdgpu_family
+        payload["use_case"]["the_rock"]["therock_requirements_txt"] = (
+            f"--index-url https://rocm.nightlies.amd.com/v2/{amdgpu_family}/ "
+            f"rocm[libraries,devel] torch torchvision torchaudio"
+        )
     return json.dumps(payload)
 
 
