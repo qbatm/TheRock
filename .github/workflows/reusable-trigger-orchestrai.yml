@@ -27,7 +27,7 @@ on:
         description: 'Jenkins agent pool type'
         required: false
         type: string
-        default: 'default_hot'
+        default: 'default_therock_hot'
       polling_interval:
         description: 'Polling interval in seconds'
         required: false
@@ -101,7 +101,7 @@ on:
         description: 'Jenkins agent pool type'
         required: false
         type: string
-        default: 'default_hot'
+        default: 'default_therock_hot'
       polling_interval:
         description: 'Polling interval in seconds'
         required: false

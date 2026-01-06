@@ -62,7 +62,7 @@ S3_BUCKETS = {
 JENKINS_URL = "https://ucicd-jenkins.amd.com"
 # JENKINS_JOB = "ucicd-production-v1"
 JENKINS_JOB = "DevOps/nm/ucicd-production-v1"
-DEFAULT_POOL_TYPE = "default_hot"
+DEFAULT_POOL_TYPE = "default_therock_hot"
 
 
 def run_command(cmd: str, timeout: int = 60) -> subprocess.CompletedProcess:

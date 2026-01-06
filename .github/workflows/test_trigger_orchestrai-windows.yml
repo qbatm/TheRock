@@ -23,7 +23,7 @@ on:
       pool_type:
         description: 'Jenkins agent pool type'
         type: string
-        default: 'default_hot'
+        default: 'default_therock_hot'
 
 permissions:
   contents: read
