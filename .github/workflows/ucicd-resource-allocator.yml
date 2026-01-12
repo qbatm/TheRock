@@ -8,6 +8,13 @@ name: UCICD Resource Allocator
 # pre-provisioned machines that are already ready and waiting.
 
 on:
+  push:
+    paths:
+      - '.github/workflows/ucicd-resource-allocator.yml'
+      - 'build_tools/ucicd_resource_allocator.py'
+      - 'build_tools/ucicd_runner_config.json'
+      - 'build_tools/tests/test_ucicd_resource_allocator.py'
+
   schedule:
     # Run every hour
     - cron: '0 * * * *'
