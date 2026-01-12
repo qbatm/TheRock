@@ -1,0 +1,132 @@
+name: On-Demand Runner Service
+
+# This workflow acts as an API endpoint service to maintain an on-demand pool of runners.
+# It can be triggered via the GitHub API using repository_dispatch or manually.
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  repository_dispatch:
+    types: [manage-runner]
+    # Expects payload:
+    # {
+    #   "action": "add" | "remove",
+    #   "label": "string",
+    #   "count": number (optional, default 1),
+    #   "repository": "owner/repo" (optional, defaults to current repo)
+    # }
+
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+        - add
+        - remove
+      label:
+        description: 'Runner label (e.g. navi3x, gpu-mi300x)'
+        required: true
+        type: string
+      count:
+        description: 'Number of runners'
+        required: false
+        default: '1'
+        type: string
+      repository:
+        description: 'Target GitHub repository (owner/repo)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  manage-runner:
+    runs-on: arc-lnx-pub
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Parse Inputs
+        id: inputs
+        run: |
+          # Determine inputs based on trigger event
+          if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+            echo "ACTION=${{ github.event.client_payload.action }}" >> $GITHUB_OUTPUT
+            echo "LABEL=${{ github.event.client_payload.label }}" >> $GITHUB_OUTPUT
+            echo "COUNT=${{ github.event.client_payload.count || 1 }}" >> $GITHUB_OUTPUT
+            echo "REPO=${{ github.event.client_payload.repository || github.repository }}" >> $GITHUB_OUTPUT
+          else
+            echo "ACTION=${{ inputs.action }}" >> $GITHUB_OUTPUT
+            echo "LABEL=${{ inputs.label }}" >> $GITHUB_OUTPUT
+            echo "COUNT=${{ inputs.count }}" >> $GITHUB_OUTPUT
+            if [ -n "${{ inputs.repository }}" ]; then
+              echo "REPO=${{ inputs.repository }}" >> $GITHUB_OUTPUT
+            else
+              echo "REPO=${{ github.repository }}" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Calculate Secret Name
+        id: secret-calc
+        shell: bash
+        run: |
+          # Naming Convention: PAT-<OWNER>-<REPO> (Uppercased, slashes to hyphens)
+          # Example: qbatm/TheRock -> PAT-QBATM-THEROCK
+          REPO="${{ steps.inputs.outputs.REPO }}"
+          SECRET_NAME=$(echo "PAT-$REPO" | tr '[:lower:]' '[:upper:]' | tr '/' '-')
+          echo "SECRET_NAME=$SECRET_NAME" >> $GITHUB_OUTPUT
+          echo "Target Secret Name: $SECRET_NAME"
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Repository PAT
+        id: get-pat
+        uses: Azure/get-keyvault-secrets@v1
+        with:
+          keyvault: ${{ vars.RUNNER_SERVICE_KV }}
+          secrets: ${{ steps.secret-calc.outputs.SECRET_NAME }}
+
+      - name: Execute Service Request
+        env:
+          # Dynamically retrieve the secret output from the previous step
+          GITHUB_TOKEN: ${{ steps.get-pat.outputs[steps.secret-calc.outputs.SECRET_NAME] }}
+          RUNNER_CONFIG: "build_tools/ucicd_runner_config.json"
+        run: |
+          ACTION="${{ steps.inputs.outputs.ACTION }}"
+          LABEL="${{ steps.inputs.outputs.LABEL }}"
+          COUNT="${{ steps.inputs.outputs.COUNT }}"
+          REPO="${{ steps.inputs.outputs.REPO }}"
+
+          echo "Processing Request:"
+          echo "  Action: $ACTION"
+          echo "  Label:  $LABEL"
+          echo "  Count:  $COUNT"
+          echo "  Repo:   $REPO"
+          echo "  Config: $RUNNER_CONFIG"
+
+          python build_tools/ucicd_resource_allocator.py \
+            --config "$RUNNER_CONFIG" \
+            --repository "$REPO" \
+            --action "$ACTION" \
+            --label "$LABEL" \
+            --count "$COUNT"
+
+      - name: Report Status
+        if: always()
+        run: |
+          echo "## On-Demand Runner Service Report" >> $GITHUB_STEP_SUMMARY
+          echo "- **Action**: ${{ steps.inputs.outputs.ACTION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Label**: ${{ steps.inputs.outputs.LABEL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Count**: ${{ steps.inputs.outputs.COUNT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
