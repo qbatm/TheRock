@@ -53,6 +53,8 @@ jobs:
       - name: Run allocator
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LNX_SSH_PASS: ${{ secrets.LNX_SSH_PASS }}
+          WIN_SSH_PASS: ${{ secrets.WIN_SSH_PASS }}
         run: |
           set -euo pipefail
 
