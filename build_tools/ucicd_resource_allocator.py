@@ -34,8 +34,7 @@ import requests
 class RunnerRequirement:
     """Represents a runner requirement from the configuration."""
     label: str
-    min_count: int
-    max_count: int
+    max_count: int  # Target number of runners to maintain
     maas_tags: list[str]  # Tags used to identify machines in the pool
     platform: str = "linux"  # "linux" or "windows"
     description: str = ""
@@ -91,8 +90,7 @@ def load_config(config_path: str) -> list[RunnerRequirement]:
     for runner_config in config.get("runners", []):
         req = RunnerRequirement(
             label=runner_config["label"],
-            min_count=runner_config.get("min_count", 1),
-            max_count=runner_config.get("max_count", 10),
+            max_count=runner_config.get("max_count", 1),
             maas_tags=runner_config.get("maas_tags", []),
             platform=runner_config.get("platform", "linux"),
             description=runner_config.get("description", ""),
@@ -729,6 +727,8 @@ def calculate_allocation_actions(
 ) -> list[AllocationAction]:
     """
     Calculate what actions need to be taken to meet runner requirements.
+    
+    Tries to fill up to max_count runners for each requirement.
     """
     actions = []
     
@@ -737,33 +737,23 @@ def calculate_allocation_actions(
         status = get_current_runners(repository, req.label)
         print(f"    Found: {status.connected_count} connected ({status.busy_count} busy, {status.idle_count} idle)")
         
-        if status.connected_count < req.min_count:
-            # Need to add runners
-            needed = req.min_count - status.connected_count
+        if status.connected_count < req.max_count:
+            # Try to add runners up to max_count
+            needed = req.max_count - status.connected_count
             actions.append(AllocationAction(
                 label=req.label,
                 action="add",
                 count=needed,
-                reason=f"Below minimum ({status.connected_count}/{req.min_count})",
-                requirement=req,
-            ))
-        elif status.connected_count > req.max_count:
-            # Need to remove runners (scale down)
-            excess = status.connected_count - req.max_count
-            actions.append(AllocationAction(
-                label=req.label,
-                action="remove",
-                count=excess,
-                reason=f"Above maximum ({status.connected_count}/{req.max_count})",
+                reason=f"Below target ({status.connected_count}/{req.max_count})",
                 requirement=req,
             ))
         else:
-            # Within acceptable range
+            # Already at or above max_count
             actions.append(AllocationAction(
                 label=req.label,
                 action="none",
                 count=0,
-                reason=f"OK ({status.connected_count} runners, range: {req.min_count}-{req.max_count})",
+                reason=f"OK ({status.connected_count}/{req.max_count} runners)",
                 requirement=req,
             ))
     
@@ -861,19 +851,6 @@ def allocate_runners(
     
     print(f"  Successfully registered {success_count}/{len(machines_to_allocate)} runner(s)")
     return success_count == len(machines_to_allocate)
-
-
-def release_runners(action: AllocationAction, repository: str) -> bool:
-    """
-    Release excess runners back to the machine pool for a specific label.
-    
-    TODO: This is a mock implementation. Replace with actual release logic.
-    """
-    # Mock implementation
-    print(f"  [MOCK] Releasing {action.count} runner(s) with label '{action.label}' back to pool")
-    print(f"  [MOCK] This would unregister runners and return machines to the pool")
-    
-    return True
 
 
 def delete_runner_from_github(repository: str, runner_id: int) -> bool:
@@ -1123,15 +1100,6 @@ def execute_actions(
                 success_count += 1
             else:
                 failure_count += 1
-                
-        elif action.action == "remove":
-            print(f"\n[ACTION] Releasing {action.count} runner(s) for '{action.label}' back to pool")
-            print(f"  Reason: {action.reason}")
-            if release_runners(action, repository):
-                success_count += 1
-            else:
-                failure_count += 1
-                
         else:
             print(f"\n[OK] '{action.label}': {action.reason}")
     
@@ -1213,7 +1181,7 @@ def main():
     # Print requirements
     print("\n--- Runner Requirements ---")
     for req in requirements:
-        print(f"  - {req.label}: min={req.min_count}, max={req.max_count} (tags: {req.maas_tags})")
+        print(f"  - {req.label}: max={req.max_count} (tags: {req.maas_tags}, platform: {req.platform})")
         if req.description:
             print(f"    Description: {req.description}")
     

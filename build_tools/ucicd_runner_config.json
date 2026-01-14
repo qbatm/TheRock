@@ -7,7 +7,6 @@
       "label": "navi3x",
       "maas_tags": ["gpu_navi3x"],
       "platform": "linux",
-      "min_count": 1,
       "max_count": 2,
       "description": "Linux navi3x public runners for general CI tasks"
     },
@@ -15,7 +14,6 @@
       "label": "navi3x",
       "maas_tags": ["gpu_navi3x"],
       "platform": "windows",
-      "min_count": 2,
       "max_count": 5,
       "description": "Windows navi3x public runners for Windows builds"
     },
@@ -23,7 +21,6 @@
       "label": "navi4x",
       "maas_tags": ["gpu_navi4x"],
       "platform": "linux",
-      "min_count": 1,
       "max_count": 2,
       "description": "Linux navi4x public runners for general CI tasks"
     },
@@ -31,7 +28,6 @@
       "label": "navi4x",
       "maas_tags": ["gpu_navi4x"],
       "platform": "windows",
-      "min_count": 1,
       "max_count": 3,
       "description": "Windows navi4x public runners for Windows builds"
     },
@@ -39,7 +35,6 @@
       "label": "stxh",
       "maas_tags": ["igpu_stxh"],
       "platform": "linux",
-      "min_count": 1,
       "max_count": 2,
       "description": "Linux stxh public runners for general CI tasks"
     },
@@ -47,14 +42,8 @@
       "label": "stxh",
       "maas_tags": ["igpu_stxh"],
       "platform": "windows",
-      "min_count": 1,
       "max_count": 3,
       "description": "Windows stxh public runners for Windows builds"
     }
-  ],
-  "settings": {
-    "scale_up_threshold_percent": 80,
-    "scale_down_threshold_percent": 20,
-    "grace_period_minutes": 10
-  }
+  ]
 }
