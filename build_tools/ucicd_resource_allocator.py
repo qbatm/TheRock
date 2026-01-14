@@ -654,12 +654,17 @@ def get_all_registered_runners(repository: str) -> list[RegisteredRunner]:
     return registered_runners
 
 
-def get_current_runners(repository: str, label: str) -> RunnerStatus:
+def get_current_runners(repository: str, maas_tags: list[str], platform: str) -> RunnerStatus:
     """
-    Get the current status of runners for a specific label.
+    Get the current status of runners for specific maas_tags and platform.
     
     Uses GitHub API: GET /repos/{owner}/{repo}/actions/runners
-    and filters runners by the specified label.
+    and filters runners by the specified maas_tags AND platform (using runner's OS field).
+    
+    Args:
+        repository: The GitHub repository (owner/repo format).
+        maas_tags: List of tags to search for (runner must have at least one).
+        platform: Platform filter ('linux' or 'windows').
     """
     token = get_github_token()
     
@@ -675,6 +680,13 @@ def get_current_runners(repository: str, label: str) -> RunnerStatus:
     connected_count = 0
     busy_count = 0
     idle_count = 0
+    
+    # Map platform to GitHub's OS field values
+    platform_to_os = {
+        "linux": "Linux",
+        "windows": "Windows",
+    }
+    expected_os = platform_to_os.get(platform, platform)
     
     # Handle pagination
     page = 1
@@ -698,10 +710,14 @@ def get_current_runners(repository: str, label: str) -> RunnerStatus:
         data = response.json()
         runners = data.get("runners", [])
         
-        # Filter runners that have the specified label
+        # Filter runners that have at least one maas_tag AND match the platform (by OS)
         for runner in runners:
             runner_labels = [lbl["name"] for lbl in runner.get("labels", [])]
-            if label in runner_labels:
+            runner_os = runner.get("os", "Unknown")
+            
+            # Must have at least one maas_tag AND match the expected OS
+            has_matching_tag = any(tag in runner_labels for tag in maas_tags)
+            if has_matching_tag and runner_os == expected_os:
                 connected_count += 1
                 if runner.get("busy", False):
                     busy_count += 1
@@ -714,7 +730,7 @@ def get_current_runners(repository: str, label: str) -> RunnerStatus:
         page += 1
     
     return RunnerStatus(
-        label=label,
+        label=",".join(maas_tags),
         connected_count=connected_count,
         busy_count=busy_count,
         idle_count=idle_count,
@@ -733,8 +749,8 @@ def calculate_allocation_actions(
     actions = []
     
     for req in requirements:
-        print(f"  Checking runners with label '{req.label}'...")
-        status = get_current_runners(repository, req.label)
+        print(f"  Checking runners with tags {req.maas_tags} on platform '{req.platform}'...")
+        status = get_current_runners(repository, req.maas_tags, req.platform)
         print(f"    Found: {status.connected_count} connected ({status.busy_count} busy, {status.idle_count} idle)")
         
         if status.connected_count < req.max_count:
@@ -764,7 +780,7 @@ def allocate_runners(
     action: AllocationAction,
     requirement: RunnerRequirement,
     repository: str,
-) -> bool:
+) -> tuple[bool, str]:
     """
     Allocate runners from the pre-provisioned machine pool for a specific label.
     
@@ -779,7 +795,9 @@ def allocate_runners(
         repository: The GitHub repository (owner/repo format).
     
     Returns:
-        True if all runners were allocated successfully, False otherwise.
+        Tuple of (success, reason) where:
+        - success: True if allocation succeeded or pool is just exhausted
+        - reason: 'success', 'pool_exhausted', or 'error'
     """
     print(f"  Looking for {action.count} machine(s) with tags {requirement.maas_tags} "
           f"on platform '{requirement.platform}'...")
@@ -791,8 +809,8 @@ def allocate_runners(
     )
     
     if not available_machines:
-        print(f"  ERROR: No available machines found in pool matching criteria")
-        return False
+        print(f"  WARNING: No available machines found in pool matching criteria")
+        return True, "pool_exhausted"
     
     print(f"  Found {len(available_machines)} machine(s) in pool matching criteria")
     
@@ -802,7 +820,7 @@ def allocate_runners(
         registered_runner_names = get_all_registered_runner_names(repository)
     except ValueError as e:
         print(f"  ERROR: Failed to get registered runners: {e}")
-        return False
+        return False, "error"
     
     unregistered_machines = [
         m for m in available_machines
@@ -816,8 +834,8 @@ def allocate_runners(
     available_machines = unregistered_machines
     
     if not available_machines:
-        print(f"  ERROR: All matching machines are already registered as runners")
-        return False
+        print(f"  WARNING: All matching machines are already registered as runners")
+        return True, "pool_exhausted"
     
     print(f"  {len(available_machines)} unregistered machine(s) available for allocation")
     
@@ -835,10 +853,12 @@ def allocate_runners(
         print(f"  Registration token obtained")
     except ValueError as e:
         print(f"  ERROR: Failed to generate registration token: {e}")
-        return False
+        return False, "error"
     
     # Labels to assign to the runners
-    labels = [requirement.label, requirement.platform]
+    # Include: platform (e.g., linux) and maas_tags (e.g., gpu_navi4x)
+    # The maas_tags are the actual hardware identifiers used in workflows
+    labels = [requirement.platform] + requirement.maas_tags
     
     # Register each machine as a runner
     success_count = 0
@@ -850,7 +870,13 @@ def allocate_runners(
             print(f"  Failed to register runner on {machine.hostname}")
     
     print(f"  Successfully registered {success_count}/{len(machines_to_allocate)} runner(s)")
-    return success_count == len(machines_to_allocate)
+    
+    if success_count == 0:
+        return False, "error"
+    elif success_count < len(machines_to_allocate):
+        return True, "partial"
+    else:
+        return True, "success"
 
 
 def delete_runner_from_github(repository: str, runner_id: int) -> bool:
@@ -969,7 +995,7 @@ def release_all_runners(
     repository: str,
     force: bool = False,
     prefix: str | None = None,
-    hostname: str | None = None,
+    hostnames: list[str] | None = None,
 ) -> tuple[int, int]:
     """
     Release runners from the repository.
@@ -978,7 +1004,7 @@ def release_all_runners(
         repository: The GitHub repository (owner/repo format).
         force: If True, delete from GitHub even if SSH unregister fails.
         prefix: If provided, only release runners whose names start with this prefix.
-        hostname: If provided, release only the runner with this exact hostname (overrides prefix).
+        hostnames: If provided, release only runners with these exact hostnames (overrides prefix).
     
     Returns:
         Tuple of (success_count, failure_count).
@@ -988,8 +1014,8 @@ def release_all_runners(
     print(f"{'=' * 60}")
     print(f"Repository: {repository}")
     print(f"Force mode: {force}")
-    if hostname:
-        print(f"Target hostname: {hostname}")
+    if hostnames:
+        print(f"Target hostname(s): {', '.join(hostnames)}")
     else:
         print(f"Prefix filter: {prefix or '(none - releasing ALL runners)'}")
     print()
@@ -1008,14 +1034,19 @@ def release_all_runners(
     
     print(f"Found {len(runners)} total registered runner(s)")
     
-    # Filter by hostname (exact match) or prefix
-    if hostname:
+    # Filter by hostnames (exact match) or prefix
+    if hostnames:
+        hostname_set = set(hostnames)
         original_count = len(runners)
-        runners = [r for r in runners if r.name == hostname]
+        runners = [r for r in runners if r.name in hostname_set]
         if not runners:
-            print(f"No runner found with hostname '{hostname}'.")
+            print(f"No runners found matching hostname(s): {', '.join(hostnames)}")
             return 0, 0
-        print(f"Found runner matching hostname '{hostname}'")
+        found_names = {r.name for r in runners}
+        not_found = hostname_set - found_names
+        if not_found:
+            print(f"WARNING: Runner(s) not found: {', '.join(not_found)}")
+        print(f"Found {len(runners)} runner(s) matching specified hostname(s)")
     elif prefix:
         original_count = len(runners)
         runners = [r for r in runners if r.name.startswith(prefix)]
@@ -1095,15 +1126,16 @@ def release_all_runners(
 def execute_actions(
     actions: list[AllocationAction],
     repository: str
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """
     Execute the calculated allocation actions.
     
     Returns:
-        Tuple of (success_count, failure_count)
+        Tuple of (success_count, failure_count, pool_exhausted_count)
     """
     success_count = 0
     failure_count = 0
+    pool_exhausted_count = 0
     
     for action in actions:
         if action.action == "add":
@@ -1112,14 +1144,18 @@ def execute_actions(
             if action.requirement is None:
                 print(f"  ERROR: No requirement found for action")
                 failure_count += 1
-            elif allocate_runners(action, action.requirement, repository):
-                success_count += 1
             else:
-                failure_count += 1
+                ok, reason = allocate_runners(action, action.requirement, repository)
+                if reason == "pool_exhausted":
+                    pool_exhausted_count += 1
+                elif ok:
+                    success_count += 1
+                else:
+                    failure_count += 1
         else:
             print(f"\n[OK] '{action.label}': {action.reason}")
     
-    return success_count, failure_count
+    return success_count, failure_count, pool_exhausted_count
 
 
 def main():
@@ -1153,7 +1189,7 @@ def main():
     )
     parser.add_argument(
         "--hostname",
-        help="Release a specific runner by exact hostname (overrides --prefix)"
+        help="Release specific runner(s) by hostname (comma-separated for multiple, overrides --prefix)"
     )
     
     args = parser.parse_args()
@@ -1175,11 +1211,16 @@ def main():
     
     # Handle --release mode
     if args.release:
+        # Parse comma-separated hostnames if provided
+        hostnames = None
+        if args.hostname:
+            hostnames = [h.strip() for h in args.hostname.split(",") if h.strip()]
+        
         success, failures = release_all_runners(
             repository,
             force=args.force,
             prefix=args.prefix,
-            hostname=args.hostname,
+            hostnames=hostnames,
         )
         if failures > 0:
             print("\nWARNING: Some runners failed to release!")
@@ -1223,21 +1264,64 @@ def main():
     
     # Execute actions
     print("\n--- Executing Actions ---")
-    success, failures = execute_actions(actions, repository)
+    success, failures, pool_exhausted = execute_actions(actions, repository)
     
     # Summary
     print("\n" + "=" * 60)
     print("Summary")
     print("=" * 60)
-    actions_needed = sum(1 for a in actions if a.action != "none")
+    
+    # Re-check current state to get accurate counts for summary
+    total_runners_connected = 0
+    total_runners_needed = 0
+    requirements_at_target = 0
+    requirements_partial = 0
+    requirements_empty = 0
+    
+    print("\nRunner Status by Requirement:")
+    for req in requirements:
+        status = get_current_runners(repository, req.maas_tags, req.platform)
+        total_runners_connected += status.connected_count
+        total_runners_needed += req.max_count
+        
+        if status.connected_count >= req.max_count:
+            requirements_at_target += 1
+            icon = "[OK]"
+        elif status.connected_count > 0:
+            requirements_partial += 1
+            icon = "[..]"
+        else:
+            requirements_empty += 1
+            icon = "[  ]"
+        
+        print(f"  {icon} {req.label}/{req.platform}: {status.connected_count}/{req.max_count} runners")
+    
+    print()
     print(f"Total requirements: {len(requirements)}")
-    print(f"Actions needed: {actions_needed}")
-    print(f"Successful actions: {success}")
-    print(f"Failed actions: {failures}")
+    print(f"  Fully satisfied: {requirements_at_target}")
+    print(f"  Partially satisfied: {requirements_partial}")
+    print(f"  No runners: {requirements_empty}")
+    print()
+    print(f"Total runners: {total_runners_connected}/{total_runners_needed}")
+    print()
+    print(f"This run:")
+    print(f"  New runners allocated: {success}")
+    print(f"  Pool exhausted: {pool_exhausted}")
+    print(f"  Allocation errors: {failures}")
     
     if failures > 0:
-        print("\nWARNING: Some actions failed!")
+        print("\nERROR: Some allocations failed!")
         sys.exit(1)
+    
+    # Determine the overall status message
+    if requirements_at_target == len(requirements):
+        print("\nOK: All requirements are fully satisfied.")
+    elif pool_exhausted > 0 and success == 0:
+        print("\nOK: Pool fully utilized - all available machines are registered as runners.")
+    elif pool_exhausted > 0:
+        print(f"\nOK: Allocated {success} new runner(s). Pool now exhausted.")
+    elif success > 0:
+        print(f"\nOK: Successfully allocated {success} new runner(s).")
     
     print("\nResource allocation check completed successfully.")
     return 0
