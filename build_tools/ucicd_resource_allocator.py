@@ -965,24 +965,33 @@ def unregister_runner_on_machine(
     return True
 
 
-def release_all_runners(repository: str, force: bool = False, prefix: str | None = None) -> tuple[int, int]:
+def release_all_runners(
+    repository: str,
+    force: bool = False,
+    prefix: str | None = None,
+    hostname: str | None = None,
+) -> tuple[int, int]:
     """
-    Release all runners from the repository.
+    Release runners from the repository.
     
     Args:
         repository: The GitHub repository (owner/repo format).
         force: If True, delete from GitHub even if SSH unregister fails.
         prefix: If provided, only release runners whose names start with this prefix.
+        hostname: If provided, release only the runner with this exact hostname (overrides prefix).
     
     Returns:
         Tuple of (success_count, failure_count).
     """
     print(f"\n{'=' * 60}")
-    print("RELEASING ALL RUNNERS")
+    print("RELEASING RUNNERS")
     print(f"{'=' * 60}")
     print(f"Repository: {repository}")
     print(f"Force mode: {force}")
-    print(f"Prefix filter: {prefix or '(none - releasing ALL runners)'}")
+    if hostname:
+        print(f"Target hostname: {hostname}")
+    else:
+        print(f"Prefix filter: {prefix or '(none - releasing ALL runners)'}")
     print()
     
     # Get all registered runners
@@ -999,8 +1008,15 @@ def release_all_runners(repository: str, force: bool = False, prefix: str | None
     
     print(f"Found {len(runners)} total registered runner(s)")
     
-    # Filter by prefix if specified
-    if prefix:
+    # Filter by hostname (exact match) or prefix
+    if hostname:
+        original_count = len(runners)
+        runners = [r for r in runners if r.name == hostname]
+        if not runners:
+            print(f"No runner found with hostname '{hostname}'.")
+            return 0, 0
+        print(f"Found runner matching hostname '{hostname}'")
+    elif prefix:
         original_count = len(runners)
         runners = [r for r in runners if r.name.startswith(prefix)]
         skipped = original_count - len(runners)
@@ -1121,19 +1137,23 @@ def main():
         help="GitHub repository in format owner/repo"
     )
     parser.add_argument(
-        "--release-all",
+        "--release",
         action="store_true",
-        help="Release all runners from the repository (unregister and stop)"
+        help="Release runners from the repository (use --hostname for specific, --prefix for filtered, or neither for all)"
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Force release even if runners are busy (use with --release-all)"
+        help="Force release even if runners are busy (use with --release)"
     )
     parser.add_argument(
         "--prefix",
         default="CS-UCICD",
         help="Only release runners whose names start with this prefix (default: CS-UCICD)"
+    )
+    parser.add_argument(
+        "--hostname",
+        help="Release a specific runner by exact hostname (overrides --prefix)"
     )
     
     args = parser.parse_args()
@@ -1153,9 +1173,14 @@ def main():
     print(f"Config: {args.config}")
     print("=" * 60)
     
-    # Handle --release-all mode
-    if args.release_all:
-        success, failures = release_all_runners(repository, force=args.force, prefix=args.prefix)
+    # Handle --release mode
+    if args.release:
+        success, failures = release_all_runners(
+            repository,
+            force=args.force,
+            prefix=args.prefix,
+            hostname=args.hostname,
+        )
         if failures > 0:
             print("\nWARNING: Some runners failed to release!")
             sys.exit(1)
@@ -1164,7 +1189,7 @@ def main():
     
     # Normal mode requires config
     if not args.config:
-        print("ERROR: --config is required (unless using --release-all)")
+        print("ERROR: --config is required (unless using --release)")
         sys.exit(1)
     
     # Load configuration
