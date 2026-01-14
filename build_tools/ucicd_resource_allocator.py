@@ -443,16 +443,27 @@ def register_runner_on_windows(
     
     # Commands to execute on the Windows machine via SSH
     # This assumes the runner is already downloaded and extracted at C:\actions-runner
-    # Note: Using ';' instead of '&&' because SSH on Windows uses PowerShell
+    # Using full paths for reliable execution in PowerShell over SSH
+    runner_dir = "C:\\actions-runner"
     configure_cmd = (
-        f"cd C:\\actions-runner; "
-        f".\\config.cmd --url {repo_url} --token {registration_token} "
+        f"& '{runner_dir}\\config.cmd' --url {repo_url} --token {registration_token} "
         f"--name {runner_name} --labels {labels_str} --unattended --replace"
     )
     
-    # Install and start runner as a Windows service (persists across SSH disconnect and reboots)
-    install_service_cmd = "cd C:\\actions-runner; .\\svc.cmd install"
-    start_service_cmd = "cd C:\\actions-runner; .\\svc.cmd start"
+    # Check if svc.cmd exists (may not exist in older runner versions)
+    check_svc_cmd = f"Test-Path '{runner_dir}\\svc.cmd'"
+    
+    # Install and start runner as a Windows service (if svc.cmd exists)
+    install_service_cmd = f"& '{runner_dir}\\svc.cmd' install"
+    start_service_cmd = f"& '{runner_dir}\\svc.cmd' start"
+    
+    # Fallback: Create a scheduled task to run the runner at startup
+    task_name = f"GitHubActionsRunner_{runner_name}"
+    create_task_cmd = (
+        f"schtasks /Create /TN '{task_name}' /TR '{runner_dir}\\run.cmd' "
+        f"/SC ONSTART /RU SYSTEM /F /RL HIGHEST"
+    )
+    start_task_cmd = f"schtasks /Run /TN '{task_name}'"
     
     print(f"    Connecting to {ssh_target}...")
     
@@ -465,22 +476,47 @@ def register_runner_on_windows(
     
     print(f"    Runner configured successfully")
     
-    # Install the runner as a Windows service
-    print(f"    Installing runner as Windows service...")
-    success, stdout, stderr = run_ssh_command(machine, install_service_cmd, timeout=60)
+    # Check if svc.cmd exists
+    print(f"    Checking for svc.cmd...")
+    success, stdout, stderr = run_ssh_command(machine, check_svc_cmd, timeout=30)
+    has_svc_cmd = success and "True" in stdout
     
-    if not success:
-        print(f"    WARNING: Service install returned non-zero: {stderr}")
-        # May fail if already installed, continue to start
+    if has_svc_cmd:
+        # Use the service approach
+        print(f"    Installing runner as Windows service...")
+        success, stdout, stderr = run_ssh_command(machine, install_service_cmd, timeout=60)
+        
+        if not success:
+            print(f"    ERROR: Service install failed: {stderr}")
+            return False
+        
+        print(f"    Starting runner service...")
+        success, stdout, stderr = run_ssh_command(machine, start_service_cmd, timeout=30)
+        
+        if not success:
+            print(f"    ERROR: Service start failed: {stderr}")
+            return False
+        
+        print(f"    Runner service started on {machine.hostname}")
+    else:
+        # Fallback to scheduled task
+        print(f"    svc.cmd not found, using scheduled task fallback...")
+        print(f"    Creating scheduled task...")
+        success, stdout, stderr = run_ssh_command(machine, create_task_cmd, timeout=60)
+        
+        if not success:
+            print(f"    ERROR: Failed to create scheduled task: {stderr}")
+            return False
+        
+        print(f"    Starting scheduled task...")
+        success, stdout, stderr = run_ssh_command(machine, start_task_cmd, timeout=30)
+        
+        if not success:
+            print(f"    WARNING: Failed to start scheduled task: {stderr}")
+            # Task was created, it will run on next boot
+        
+        print(f"    Runner scheduled task created on {machine.hostname}")
     
-    # Start the service
-    print(f"    Starting runner service...")
-    success, stdout, stderr = run_ssh_command(machine, start_service_cmd, timeout=30)
-    
-    if not success:
-        print(f"    WARNING: Service start returned non-zero: {stderr}")
-    
-    print(f"    Runner service started on {machine.hostname}")
     return True
 
 
@@ -920,9 +956,18 @@ def unregister_runner_on_machine(
         stop_cmd = "cd ~/actions-runner && sudo ./svc.sh stop && sudo ./svc.sh uninstall || true"
         remove_cmd = f"cd ~/actions-runner && ./config.sh remove --token {removal_token}"
     else:
-        # Stop and uninstall the Windows service
-        stop_cmd = "cd C:\\actions-runner; .\\svc.cmd stop; .\\svc.cmd uninstall"
-        remove_cmd = f"cd C:\\actions-runner; .\\config.cmd remove --token {removal_token}"
+        # Stop and uninstall the Windows service or scheduled task
+        runner_dir = "C:\\actions-runner"
+        task_name = f"GitHubActionsRunner_{runner.name}"
+        # Try both service and scheduled task cleanup (one will succeed)
+        stop_cmd = (
+            f"& '{runner_dir}\\svc.cmd' stop 2>$null; "
+            f"& '{runner_dir}\\svc.cmd' uninstall 2>$null; "
+            f"schtasks /End /TN '{task_name}' 2>$null; "
+            f"schtasks /Delete /TN '{task_name}' /F 2>$null; "
+            f"$true"  # Always return success
+        )
+        remove_cmd = f"& '{runner_dir}\\config.cmd' remove --token {removal_token}"
     
     # Stop the runner
     print(f"    Stopping runner process...")
